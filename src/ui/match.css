@@ -1,0 +1,413 @@
+/* ============================================================
+   match.css — PVP匹配/等待/房间样式
+   ============================================================ */
+
+.match-page {
+  background: linear-gradient(135deg, #0f0c29, #1a1a3e);
+}
+
+.match-container {
+  flex: 1;
+  display: flex;
+  gap: 24px;
+  padding: 20px;
+  max-width: 1000px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 左侧房间列表 */
+.room-list-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.room-list-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.room-list-header h2 {
+  font-size: 18px;
+  color: var(--gold);
+  letter-spacing: 2px;
+}
+
+.room-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.room-item {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  margin-bottom: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.room-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateX(4px);
+}
+
+.room-id {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--text-primary);
+}
+
+.room-info {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.room-players {
+  color: var(--accent-blue);
+}
+
+.room-lock-icon {
+  font-size: 14px;
+}
+
+/* 右侧创建面板 */
+.create-panel {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.create-card {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  padding: 24px 20px;
+}
+
+.create-card h3 {
+  font-size: 16px;
+  color: var(--gold);
+  margin-bottom: 16px;
+  text-align: center;
+  letter-spacing: 2px;
+}
+
+.form-group {
+  margin-bottom: 14px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.form-input:focus {
+  border-color: var(--gold);
+}
+
+.form-input::placeholder {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.toggle-switch {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.toggle-switch.on {
+  background: var(--accent-green);
+}
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s ease;
+}
+
+.toggle-switch.on::after {
+  transform: translateX(20px);
+}
+
+.toggle-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.create-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  font-size: 15px;
+}
+
+/* 快速匹配按钮 */
+.quick-match-btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 16px;
+  background: linear-gradient(135deg, #e65100, #ff9800);
+  color: #fff;
+  border-color: #ff9800;
+}
+
+.quick-match-btn:hover {
+  box-shadow: 0 6px 24px rgba(255, 152, 0, 0.4);
+}
+
+/* 等待房间页面 */
+.waiting-page {
+  background: linear-gradient(135deg, #0f0c29, #1a1a3e);
+}
+
+.waiting-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.waiting-room-label {
+  font-size: 16px;
+  color: var(--text-secondary);
+  letter-spacing: 2px;
+}
+
+.waiting-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 20px;
+}
+
+.waiting-room-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.room-id-badge {
+  font-size: 36px;
+  font-weight: 900;
+  color: var(--gold);
+  letter-spacing: 6px;
+}
+
+.room-host-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  background: rgba(255, 215, 0, 0.15);
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.waiting-status-bar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.player-slots {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  max-width: 640px;
+  width: 100%;
+}
+
+.player-slot {
+  aspect-ratio: 1;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+  border: 2px dashed rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.3s ease;
+}
+
+.player-slot.empty {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  opacity: 0.5;
+}
+
+.player-slot.occupied {
+  border-style: solid;
+  border-color: var(--accent-blue);
+  background: rgba(74, 158, 255, 0.1);
+}
+
+.player-slot.ready {
+  border-color: var(--accent-green);
+  background: rgba(76, 175, 80, 0.1);
+  animation: slotPulse 2s ease-in-out infinite;
+}
+
+.player-slot.you {
+  border-color: var(--gold);
+  background: rgba(255, 215, 0, 0.08);
+}
+
+@keyframes slotPulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(76, 175, 80, 0.3); }
+  50% { box-shadow: 0 0 16px rgba(76, 175, 80, 0.5); }
+}
+
+.slot-icon {
+  font-size: 32px;
+}
+
+.slot-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+}
+
+.slot-avatar-placeholder {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px dashed rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+}
+
+.slot-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.3;
+}
+
+.player-slot.empty .slot-name {
+  color: var(--text-dim);
+}
+
+.slot-status {
+  font-size: 11px;
+  color: var(--accent-green);
+  font-weight: bold;
+}
+
+.waiting-actions {
+  display: flex;
+  gap: 16px;
+}
+
+.waiting-hint {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+  animation: float 2s ease-in-out infinite;
+}
+
+/* AI 槽位样式 */
+.player-slot.ai-slot {
+  border-color: var(--accent-purple);
+  background: rgba(156, 39, 176, 0.1);
+}
+
+.player-slot.ai-slot .slot-status {
+  color: var(--accent-purple);
+}
+
+/* 321倒计时遮罩 */
+.countdown-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.2s ease;
+}
+
+.countdown-number {
+  font-size: 120px;
+  font-weight: 900;
+  color: var(--gold);
+  text-shadow: 0 0 60px rgba(255, 215, 0, 0.6), 0 0 120px rgba(255, 215, 0, 0.3);
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.countdown-text {
+  font-size: 20px;
+  color: var(--text-secondary);
+  letter-spacing: 4px;
+}
+
+@keyframes countPulse {
+  0% { transform: scale(0.6); opacity: 0; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}

@@ -1,0 +1,273 @@
+/* ============================================================
+   chapters.css — 关卡选择页面样式
+   ============================================================ */
+
+.chapters-page {
+  background: #0a0a1a;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 章节滚动容器 */
+.chapter-scroll {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.chapter-track {
+  display: flex;
+  gap: 0;
+  transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  height: 100%;
+}
+
+.chapter-card {
+  min-width: 100vw;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.chapter-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  opacity: 0.35;
+  transition: opacity 0.5s ease;
+}
+
+/* 各国背景色 */
+.chapter-mondstadt::before { background: linear-gradient(135deg, #1a5c3a, #2d8a5e, #1a5c3a); }
+.chapter-liyue::before { background: linear-gradient(135deg, #8b6914, #d4a017, #8b6914); }
+.chapter-inazuma::before { background: linear-gradient(135deg, #6a1b9a, #9c27b0, #6a1b9a); }
+.chapter-sumeru::before { background: linear-gradient(135deg, #1b5e20, #388e3c, #1b5e20); }
+.chapter-fontaine::before { background: linear-gradient(135deg, #01579b, #0288d1, #01579b); }
+.chapter-natlan::before { background: linear-gradient(135deg, #bf360c, #e64a19, #bf360c); }
+.chapter-nodkrai::before { background: linear-gradient(135deg, #4a148c, #7b1fa2, #4a148c); }
+.chapter-snezhnaya::before { background: linear-gradient(135deg, #263238, #455a64, #263238); }
+
+.chapter-card:hover::before {
+  opacity: 0.55;
+}
+
+.chapter-card:hover {
+  transform: scale(1.02);
+}
+
+.chapter-content {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  animation: fadeIn 0.6s ease;
+}
+
+.chapter-number {
+  font-size: 14px;
+  color: var(--gold);
+  letter-spacing: 4px;
+  margin-bottom: 8px;
+  opacity: 0.8;
+}
+
+.chapter-name {
+  font-size: 56px;
+  font-weight: 900;
+  letter-spacing: 12px;
+  color: #fff;
+  text-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  margin-bottom: 12px;
+}
+
+.chapter-name-en {
+  font-size: 16px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 6px;
+  text-transform: uppercase;
+}
+
+.chapter-desc {
+  font-size: 13px;
+  color: rgba(255,255,255,0.45);
+  margin-top: 16px;
+  max-width: 400px;
+  line-height: 1.6;
+}
+
+.chapter-hint {
+  font-size: 12px;
+  color: rgba(255,255,255,0.3);
+  margin-top: 24px;
+  animation: float 2s ease-in-out infinite;
+}
+
+/* 左右箭头 */
+.scroll-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+}
+
+.scroll-arrow:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--gold);
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.2);
+}
+
+.scroll-arrow.left { left: 20px; }
+.scroll-arrow.right { right: 20px; }
+
+/* 章节指示器 */
+.chapter-dots {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 10;
+}
+
+.chapter-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.chapter-dot.active {
+  background: var(--gold);
+  border-color: var(--gold);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  transform: scale(1.3);
+}
+
+/* 返回按钮 */
+.back-btn {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 20;
+  padding: 8px 20px;
+  font-size: 14px;
+}
+
+/* 章节进度 */
+.chapter-progress {
+  font-size: 13px;
+  color: rgba(255, 215, 0, 0.6);
+  margin-top: 12px;
+  letter-spacing: 1px;
+}
+
+/* 关卡弹窗 */
+.level-modal .modal-box {
+  min-width: 520px;
+}
+
+.level-modal-box {
+  min-width: 520px;
+}
+
+.level-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.level-item {
+  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.level-item:hover {
+  background: rgba(255, 215, 0, 0.1);
+  border-color: var(--gold);
+  transform: translateX(4px);
+}
+
+.level-item.locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.level-item.locked:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+  transform: none;
+}
+
+.level-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.level-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.level-num {
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--gold);
+}
+
+.level-name {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.level-difficulty {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  font-weight: bold;
+}
+
+.level-go {
+  font-size: 12px;
+  color: var(--accent-green);
+  font-weight: bold;
+}
+
+.level-lock {
+  font-size: 16px;
+}

@@ -1,0 +1,25 @@
+{
+  "name": "genshin-card-web",
+  "version": "2.0.0",
+  "description": "原神杀 - 网页版杀牌游戏（支持PVE和PVP联机）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "npx tsx server/index.ts",
+    "start": "concurrently \"npm run server\" \"npm run dev\""
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "concurrently": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0"
+  }
+}
