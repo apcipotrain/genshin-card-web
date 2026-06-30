@@ -2,23 +2,29 @@
 
 > 一款以《三国杀》军争八人场为核心玩法、以《原神》角色为武将的网页卡牌游戏。
 >
-> 版本：v2.0.0 | 更新日期：2026-06-18
+> 版本：v2.3 | 更新日期：2026-06-30 | 52位武将全部实现
+
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-5-purple)](https://vitejs.dev/)
+[![Socket.IO](https://img.shields.io/badge/Socket.IO-4-black)](https://socket.io/)
 
 ---
 
 ## 项目简介
 
-**原神杀**将三国杀的策略卡牌玩法与原神的世界观融合，玩家使用原神中的角色作为武将进行对战。项目支持 **PVE 闯关** 和 **PVP 联机** 两种模式，采用 TypeScript + Vite + 原生 DOM 渲染，零框架依赖，包体极小。
+**原神杀**将三国杀的策略卡牌玩法与原神世界观融合，玩家使用原神角色作为武将进行对战。项目支持 **PVE 闯关** 和 **PVP 联机** 两种模式，采用 TypeScript + Vite + 原生 DOM 渲染，零框架依赖，包体极小。
 
 ### 核心特性
 
-- **PVE 闯关模式**：蒙德7关 + 璃月12关，2-8人动态座位布局，星级评定系统
-- **PVP 联机模式**：完整的服务端（Express + Socket.IO），8人军争身份局，支持真人+AI混合
-- **29位武将技能**：七神7位 + 非神22位，含联动机制（那维莱特-审判/龙权、莱欧斯利-狱长/公爵等）
-- **账号系统**：注册/登录/Token认证，经验与等级系统（Lv.1-60），文件持久化
-- **160张标准牌堆**：全部卡牌效果实现（杀/闪/桃/锦囊/装备/延时）
-- **7国BGM/背景**：根据主公/章节地区自动切换，壁纸轮播 + 平时/战斗BGM切换
-- **断线重连**：Socket.IO自动重连，断线AI接替，重连恢复控制
+- 🎮 **PVE 闯关模式**：蒙德7关 + 璃月12关 + **稻妻15关**，2-8人动态座位布局，星级评定系统
+- 🌐 **PVP 联机模式**：完整服务端（Express + Socket.IO），8人军争身份局，支持真人+AI混合
+- ⚔️ **52位武将技能全部实现**：七神7位 + 非神45位，含联动、增减伤、转化、标记等多样机制
+- 🎤 **角色语音系统**：全部52位武将技能均有专属语音播报
+- 👤 **账号系统**：注册/登录/Token认证，经验与等级系统（Lv.1-60），文件持久化
+- 🃏 **160张标准牌堆**：全部卡牌效果实现（杀/闪/桃/锦囊/装备/延时）
+- 🎵 **7国BGM/背景**：根据关卡/主公地区自动切换，池式随机壁纸轮播，平时→战斗BGM自动过渡
+- 🔌 **断线重连**：Socket.IO自动重连，断线AI接替，重连恢复控制
+- 📖 **神将图鉴**：52位武将详细资料弹窗，按国家/元素分组，定位标签
 
 ---
 
@@ -33,7 +39,7 @@
 | 路由 | 自研轻量 Router | 基于发布订阅模式 |
 | 网络通信 | Socket.IO 4 | WebSocket长连接，自动重连 |
 | 服务端 | Node.js + Express | PVP房间管理 + 游戏实例 |
-| 账号存储 | 内存 + JSON文件 | SHA256密码哈希 |
+| 账号存储 | 内存 + JSON文件 | SHA256密码哈希，Runtime数据不入库 |
 
 ---
 
@@ -55,27 +61,15 @@ npm install
 # 同时启动前端(3000) + PVP服务端(3457)
 npm start
 
-# 浏览器打开
-# http://localhost:3000
+# 浏览器打开 http://localhost:3000
 ```
 
-### 仅启动前端（PVE单机）
+### 单独启动
 
 ```bash
-npm run dev
-```
-
-### 仅启动服务端
-
-```bash
-npm run server
-```
-
-### 构建生产版本
-
-```bash
-npm run build
-# 产物在 dist/ 目录
+npm run dev       # 仅前端（PVE单机）
+npm run server    # 仅服务端
+npm run build     # 构建生产版本 → dist/
 ```
 
 ---
@@ -84,63 +78,69 @@ npm run build
 
 ```
 genshin-card-web/
-├── index.html                  # 入口HTML
-├── package.json                # 项目配置 (v2.0.0)
-├── vite.config.ts              # Vite构建配置（含Socket.IO代理）
-├── Resources/                  # 静态资源
-│   ├── Cards/                  # 卡牌图片 (44张)
-│   ├── Backgrounds/            # 背景图片 (71张, 7国×10)
-│   ├── Characters/             # 角色立绘 (43张)
-│   ├── Musics/                 # 背景音乐 (15首, 7国×2)
-│   ├── Suits/                  # 花色图片 (4张)
-│   └── Identities/             # 身份图片 (4张)
-├── docs/                       # 文档
-│   ├── 需求文档.md             # 功能需求
-│   ├── 设计文档.md             # 技术架构设计
-│   ├── 使用文档.md             # 使用指南
-│   ├── 接口文档.md             # 子系统接口传递关系
-│   ├── 待完成功能.md           # 版本迭代记录
-│   ├── DESIGN_PVE.md           # PVE闯关设计
-│   ├── BUG_FIX_EXPERIENCE.md   # Bug修复经验
-│   └── BUG_RECORD_PVP_PARAMS.md # PVP参数对齐记录
-├── server/                     # PVP服务端
-│   ├── index.ts                # 服务器入口
-│   ├── AccountManager.ts       # 账号+经验等级系统
-│   ├── accounts.json           # 账号持久化数据
-│   ├── RoomManager.ts          # 房间管理
-│   ├── GameHost.ts             # 服务端游戏主持人
-│   └── RemotePlayerDriver.ts   # 远程玩家驱动
+├── index.html                     # 入口HTML
+├── package.json                   # 项目配置 (v2.3)
+├── vite.config.ts                 # Vite构建配置（含Socket.IO代理）
+├── Resources/                     # 静态资源
+│   ├── Cards/                     # 卡牌图片 (44张)
+│   ├── Backgrounds/               # 背景图片 (71张, 7国×10)
+│   ├── Characters/                # 角色立绘
+│   ├── Musics/                    # 背景音乐 (7国×平时+战斗)
+│   ├── Voices/                    # 武将技能语音
+│   ├── Suits/                     # 花色图片 (4张)
+│   └── Identities/               # 身份图片 (4张)
+├── docs/                          # 完整文档
+│   ├── 需求文档.md                # 功能需求与页面结构
+│   ├── 设计文档.md                # 技术架构与数据流设计
+│   ├── 使用文档.md                # 安装启动与使用指南
+│   ├── 接口文档.md                # 六大子系统传递关系
+│   ├── PVE设计文档.md             # PVE闯关系统设计
+│   ├── 待完成功能.md              # 版本迭代记录与待办
+│   ├── 接口对齐分析_v2.3.md       # PVP/PVE/存储接口对齐分析
+│   ├── 更新日志_v2.1.md ~ v2.3.md # 完整更新日志
+│   ├── Bug修复经验.md             # Bug修复经验总结
+│   └── PVP参数Bug记录.md          # PVP参数对齐记录
+├── server/                        # PVP服务端
+│   ├── index.ts                   # 服务器入口 (Express + Socket.IO)
+│   ├── AccountManager.ts          # 账号管理 + 经验等级系统
+│   ├── RoomManager.ts             # 房间管理
+│   ├── GameHost.ts                # 服务端游戏主持人
+│   └── RemotePlayerDriver.ts      # 远程玩家驱动
 └── src/
-    ├── main.ts                 # 应用入口
-    ├── core/                   # 核心游戏逻辑
-    │   ├── types.ts            # 类型/枚举/接口定义
-    │   ├── EventBus.ts         # 事件总线
-    │   ├── Card.ts             # 卡牌模型
-    │   ├── Player.ts           # 玩家工厂
-    │   ├── DeckManager.ts      # 牌堆管理
-    │   ├── DistanceCalc.ts     # 距离计算
-    │   ├── DamageSystem.ts     # 伤害系统
-    │   ├── EquipEffectManager.ts
-    │   ├── CardEffectManager.ts
-    │   ├── GameFlowController.ts
-    │   └── skills/SkillManager.ts  # 29位武将技能
+    ├── main.ts                    # 应用总入口（路由 + 页面组装）
+    ├── core/                      # 核心游戏逻辑（PVE/PVP共用）
+    │   ├── types.ts               # 类型/枚举/接口定义
+    │   ├── EventBus.ts            # 事件总线
+    │   ├── Card.ts                # 卡牌模型工具
+    │   ├── Player.ts              # 玩家工厂
+    │   ├── DeckManager.ts         # 牌堆管理
+    │   ├── DistanceCalc.ts        # 距离计算
+    │   ├── DamageSystem.ts        # 伤害/濒死/奖惩系统
+    │   ├── EquipEffectManager.ts  # 装备效果处理器
+    │   ├── CardEffectManager.ts   # 卡牌效果处理器
+    │   ├── GameFlowController.ts  # 游戏流程控制（回合/阶段/判定）
+    │   └── skills/
+    │       └── SkillManager.ts    # 52位武将技能管理器
     ├── ai/
-    │   ├── AIDriver.ts         # AI决策引擎
-    │   └── DelayedAIDriver.ts  # 延迟包装器
+    │   ├── AIDriver.ts            # AI决策引擎（规则驱动 + 优先级队列）
+    │   └── DelayedAIDriver.ts     # 延迟包装器（可配置延迟）
     ├── data/
-    │   ├── CardData.ts         # 160张卡牌数据
-    │   ├── heroes.ts           # 43位武将数据
-    │   └── PVELevels.ts        # PVE关卡+章节+星级
+    │   ├── CardData.ts            # 160张卡牌数据
+    │   ├── heroes.ts              # 52位武将数据
+    │   ├── PVELevels.ts           # PVE关卡 + 章节 + 星级系统（含localStorage兜底）
+    │   └── SettingsCache.ts       # 用户设置内存缓存
+    ├── audio/
+    │   └── VoiceManager.ts        # 语音管理器（52位武将技能 + 卡牌语音）
     ├── network/
-    │   └── SocketManager.ts    # Socket.IO客户端单例
-    └── ui/                     # UI层
-        ├── router.ts           # 路由系统
-        ├── HomePage.ts         # 主页面
-        ├── ChaptersPage.ts     # 关卡选择
-        ├── MatchPage.ts        # PVP匹配
-        ├── WaitingPage.ts      # 房间等待
-        ├── GamePage.ts         # 游戏主界面
-        └── *.css               # 样式文件
+    │   └── SocketManager.ts       # Socket.IO客户端单例
+    └── ui/                        # UI层
+        ├── router.ts              # 路由系统
+        ├── HomePage.ts            # 主页面（账号/图鉴/设置）
+        ├── ChaptersPage.ts        # 关卡选择页面
+        ├── MatchPage.ts           # PVP匹配页面
+        ├── WaitingPage.ts         # 房间等待页面
+        ├── GamePage.ts            # 游戏主界面（PVE+PVP共用）
+        └── *.css                  # 样式文件
 ```
 
 ---
@@ -150,51 +150,50 @@ genshin-card-web/
 ### PVE 闯关模式
 
 - **9大章节**：蒙德 → 璃月 → 稻妻 → 须弥 → 枫丹 → 纳塔 → 挪德卡莱 → 至冬 → 深境螺旋
-- **已实现**：蒙德7关 + 璃月12关
+- **已实现**：蒙德7关 + 璃月12关 + 稻妻15关（共34关）
 - **阵营制**：友方 vs 敌方，无身份系统
 - **动态座位**：2-8人场自动布局
 - **星级评定**：★★★（全员存活）/ ★★（阵亡1人）/ ★（阵亡2人）
 - **解锁条件**：等级 + 前一章节累计20星
+- **本地兜底**：PVE星数 localStorage 备份，防止服务器断连丢失进度
 
 ### PVP 联机模式
 
 - **8人军争**：主公×1 / 忠臣×2 / 反贼×4 / 内奸×1
 - **真人+AI混合**：房主可设置AI填充数量
-- **选将系统**：主公从3神+3非神中选1，非主公从3候选中选1
-- **身份脱敏**：非主公、非自己的玩家身份隐藏
+- **选将系统**：主公从3神+3非神中选1，非主公从3候选中选1（30秒倒计时）
+- **身份脱敏**：非主公、非自己的玩家身份隐藏，游戏结束后公开
 - **断线处理**：AI接替 + 逃跑标记（经验为0）
-- **经验结算**：胜利/失败基础经验 + 击杀加成
+- **经验结算**：胜利/失败基础经验 + 击杀加成，升级动画
 
 ---
 
 ## 武将系统
 
-### 43位武将数据（7国）
+### 52位武将（7国全覆盖）
 
-| 国家 | 数量 | 代表角色 |
+| 国家 | 数量 | 武将列表 |
 |------|------|----------|
 | 蒙德 | 7 | 温迪、琴、迪卢克、可莉、优菈、凯亚、法尔伽 |
 | 璃月 | 9 | 钟离、刻晴、甘雨、魈、胡桃、凝光、申鹤、夜兰、兹白 |
-| 稻妻 | 7 | 雷电将军、八重神子、神里绫华、枫原万叶、珊瑚宫心海、荒泷一斗、宵宫 |
-| 须弥 | 4 | 纳西妲、艾尔海森、妮露、迪希雅 |
-| 枫丹 | 3 | 芙宁娜、那维莱特、莱欧斯利 |
-| 纳塔 | 6 | 玛薇卡、基尼奇、希诺宁、茜特菈莉、欧洛伦、玛拉妮 |
-| 挪德卡莱 | 4 | 哥伦比娅、莉奈娅、奈芙尔、菈乌玛 |
+| 稻妻 | 8 | 雷电将军、八重神子、神里绫华、枫原万叶、珊瑚宫心海、荒泷一斗、宵宫、神里绫人 |
+| 须弥 | 6 | 纳西妲、艾尔海森、妮露、迪希雅、提纳里、赛诺 |
+| 枫丹 | 7 | 芙宁娜、那维莱特、莱欧斯利、林尼、娜维娅、克洛琳德、希格雯 |
+| 纳塔 | 8 | 玛薇卡、基尼奇、希诺宁、茜特菈莉、欧洛伦、玛拉妮、瓦雷莎、恰斯卡 |
+| 挪德卡莱 | 6 | 哥伦比娅、莉奈娅、奈芙尔、菈乌玛、菲林斯、伊涅芙 |
 
-### 29位已实现技能
+### 技能机制亮点
 
-**七神(7)**：温迪、钟离、雷电将军、纳西妲、芙宁娜、玛薇卡、哥伦比娅
-
-**非神(22)**：那维莱特、八重神子、希诺宁、兹白、优菈、莱欧斯利、胡桃、凝光、艾尔海森、魈、枫原万叶、夜兰、宵宫、妮露、迪希雅、莉奈娅、荒泷一斗、珊瑚宫心海、刻晴、神里绫华、甘雨、申鹤
-
-### 特殊机制
-
-- **冰寒标记**：神里绫华/甘雨/申鹤共享，受火伤+1并移除
-- **冰翎标记**：申鹤独有，目标需2张闪抵消1张杀
-- **囚笼（双发）**：纳西妲比喻技能打出锦囊双发
-- **审判/龙权**：那维莱特修改判定牌 + 判定后摸牌
-- **狱长/公爵**：莱欧斯利与乐不思蜀联动
-- **启喻**：莉奈娅牌堆顶可见 + 打出牌时翻牌堆顶联动
+| 机制 | 代表性技能 |
+|------|-----------|
+| 伤害转化 | 娜维娅-刺玫（受伤恒为1）、迪希雅-佣兵（转移承伤） |
+| 全场禁技 | 克洛琳德-剧团（禁用全场技能） |
+| 卡牌转化 | 克洛琳德-决斗（高点数当决斗）、妮露-水月/水环（红牌当杀/黑牌当闪） |
+| 全场互动 | 林尼-魔术（全场猜牌分牌） |
+| 标记系统 | 冰寒标记（绫华/甘雨/申鹤）、冰翎（申鹤）、玉璋（钟离）、空月（哥伦比娅） |
+| 判定联动 | 那维莱特-龙权（修改判定）、莱欧斯利-狱长/公爵（乐不思蜀联动） |
+| 二段机制 | 纳西妲-囚笼（双发锦囊）、甘雨-月海（翻面回收） |
+| 回复强化 | 希格雯-温度（桃+2）、芙宁娜-歌颂（HP变化时判定） |
 
 ---
 
@@ -227,7 +226,7 @@ genshin-card-web/
 ### 7国资源
 
 每国包含：
-- **10张壁纸**（`Resources/Backgrounds/{base}0-{base}9.png`），每分钟随机轮播
+- **10张壁纸**（每分钟池式随机轮播，每10分钟轮完一组）
 - **2首BGM**（平时 + 战斗），平时BGM播放5分钟后切换战斗BGM
 
 ### 切换规则
@@ -257,9 +256,13 @@ genshin-card-web/
 | [使用文档](docs/使用文档.md) | 安装启动与使用指南 |
 | [接口文档](docs/接口文档.md) | 六大子系统传递关系详解 |
 | [待完成功能](docs/待完成功能.md) | 版本迭代记录与待办 |
-| [DESIGN_PVE](docs/DESIGN_PVE.md) | PVE闯关系统设计 |
-| [BUG_FIX_EXPERIENCE](docs/BUG_FIX_EXPERIENCE.md) | Bug修复经验总结 |
-| [BUG_RECORD_PVP_PARAMS](docs/BUG_RECORD_PVP_PARAMS.md) | PVP参数对齐记录 |
+| [PVE设计文档](docs/PVE设计文档.md) | PVE闯关系统设计 |
+| [接口对齐分析 v2.3](docs/接口对齐分析_v2.3.md) | PVP/PVE/存储接口对齐分析 |
+| [更新日志 v2.3](docs/更新日志_v2.3.md) | v2.3 版本完整更新日志 |
+| [更新日志 v2.2](docs/更新日志_v2.2.md) | v2.2 版本更新日志 |
+| [更新日志 v2.1](docs/更新日志_v2.1.md) | v2.1 版本更新日志 |
+| [Bug修复经验](docs/Bug修复经验.md) | Bug修复经验总结 |
+| [PVP参数Bug记录](docs/PVP参数Bug记录.md) | PVP参数对齐记录 |
 
 ---
 
@@ -267,26 +270,21 @@ genshin-card-web/
 
 ### 添加新武将
 
-1. 在 `src/data/heroes.ts` 的 `HEROES` 数组中添加武将数据
-2. 在 `src/core/skills/SkillManager.ts` 中实现技能（getSkills + executeActiveSkill + 钩子）
-3. 在 `Resources/Characters/` 添加角色立绘 PNG
+1. 在 `src/data/heroes.ts` 的 `ALL_HEROES` 数组中添加武将数据
+2. 在 `src/core/skills/SkillManager.ts` 中实现技能（`getSkills` + `executeActiveSkill` + 钩子）
+3. 在 `src/audio/VoiceManager.ts` 中注册语音（`VOICES` + `HERO_NAME_MAP`）
+4. 在 `src/ai/AIDriver.ts` 中添加角色AI策略
+5. 在 `Resources/Characters/` 添加角色立绘 PNG
 
 ### 添加新PVE关卡
 
 1. 在 `src/data/PVELevels.ts` 对应章节的数组中添加 `PVELevel` 数据
 2. 设置 `enemyHeroes`、`turnOrder`、`bannedHeroes`
-3. 添加 `Resources/Backgrounds/` 和 `Resources/Musics/` 资源（新章节）
 
 ### 添加新卡牌
 
 1. 在 `src/data/CardData.ts` 的 `CARD_DATA` 数组中添加卡牌数据
 2. 在 `src/core/CardEffectManager.ts` 中实现卡牌效果
-3. 在 `Resources/Cards/` 添加卡牌图片 PNG
-
-### 修改AI策略
-
-1. 编辑 `src/ai/AIDriver.ts` 的 `scoreCard` 方法调整卡牌优先级
-2. 编辑 `getEnemies`/`getAllies` 调整敌友判断逻辑
 
 ---
 
