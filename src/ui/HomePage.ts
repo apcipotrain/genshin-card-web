@@ -5,6 +5,9 @@
 import { router } from './router';
 import { socketManager } from '../network/SocketManager';
 import { ALL_HEROES, HeroData, getHeroById } from '../data/heroes';
+import { VoiceManager } from '../audio/VoiceManager';
+import { cacheGet, cacheSave, syncAllSettings } from '../data/SettingsCache';
+import { syncPVEStarsFromServer } from '../data/PVELevels';
 
 export class HomePage {
   private el!: HTMLElement;
@@ -196,6 +199,11 @@ export class HomePage {
     }
 
     // settings
+    const voiceMgr = VoiceManager.getInstance();
+    const bgmEnabled = cacheGet('bgmEnabled', true); // 默认开
+    const bgmVol = cacheGet('bgmVolume', 30);
+    const voiceEnabled = voiceMgr.isEnabled;
+    const voiceVol = Math.round(voiceMgr.getVolume() * 100);
     return `
       <div class="panel-modal" onclick="event.stopPropagation()">
         <div class="panel-modal-header">
@@ -203,9 +211,43 @@ export class HomePage {
           <button class="panel-close-btn" id="panel-close">✕</button>
         </div>
         <div class="panel-modal-body">
-          <div class="panel-placeholder">
-            <div class="placeholder-icon">⚙️</div>
-            <div>设置界面开发中，敬请期待…</div>
+          <div class="home-settings-section">
+            <div class="home-settings-group-title">🔊 音频</div>
+            <div class="home-settings-row">
+              <span>背景音乐</span>
+              <div class="toggle-switch ${bgmEnabled ? 'on' : ''}" id="home-bgm-toggle"></div>
+            </div>
+            <div class="home-settings-row">
+              <span>音乐音量</span>
+              <input type="range" min="0" max="100" value="${bgmVol}" class="home-slider" id="home-bgm-volume" />
+              <span id="home-bgm-volume-label">${bgmVol}%</span>
+            </div>
+            <div class="home-settings-row">
+              <span>角色语音</span>
+              <div class="toggle-switch ${voiceEnabled ? 'on' : ''}" id="home-voice-toggle"></div>
+            </div>
+            <div class="home-settings-row">
+              <span>语音音量</span>
+              <input type="range" min="0" max="100" value="${voiceVol}" class="home-slider" id="home-voice-volume" />
+              <span id="home-voice-volume-label">${voiceVol}%</span>
+            </div>
+          </div>
+          <div class="home-settings-section">
+            <div class="home-settings-group-title">🎮 游戏</div>
+            <div class="home-settings-row">
+              <span>AI出牌时间</span>
+              <select class="settings-select" id="home-ai-delay">
+                <option value="300">0.3秒（极速）</option>
+                <option value="500">0.5秒（高速）</option>
+                <option value="800">0.8秒（快速）</option>
+                <option value="1200">1.2秒（中等）</option>
+                <option value="1600" selected>1.6秒（推荐）</option>
+                <option value="2000">2.0秒（慢速）</option>
+                <option value="2500">2.5秒（较慢）</option>
+                <option value="3000">3.0秒（悠闲）</option>
+                <option value="5000">5.0秒（极慢）</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>`;
@@ -223,6 +265,9 @@ export class HomePage {
     }
     if (panel === 'compendium') {
       this.bindCompendiumEvents();
+    }
+    if (panel === 'settings') {
+      this.bindHomeSettingsEvents();
     }
   }
 
@@ -318,9 +363,10 @@ export class HomePage {
 
   renderCompendiumContent(): string {
     const groups = this.buildCompendiumHeroes();
+    const totalHeroes = ALL_HEROES.length;
     let html = `<div class="panel-modal panel-compendium" onclick="event.stopPropagation()">
       <div class="panel-modal-header">
-        <h2>📖 神将图鉴</h2>
+        <h2>📖 神将图鉴 <span style="font-size:14px;color:var(--text-dim);font-weight:400;">（共${totalHeroes}位角色）</span></h2>
         <button class="panel-close-btn" id="panel-close">✕</button>
       </div>
       <div class="panel-modal-body compendium-body">`;
@@ -337,7 +383,8 @@ export class HomePage {
       for (const hero of heroes) {
         const imgSrc = `Resources/Characters/${hero.name}.png`;
         const godBadge = hero.isGod ? '<span class="hero-god-badge">★神</span>' : '';
-        html += `<div class="compendium-hero-card" data-hero-id="${hero.id}">
+        const elemClass = `card-${(hero.element || '无')}`;
+        html += `<div class="compendium-hero-card ${elemClass}" data-hero-id="${hero.id}">
           <div class="compendium-hero-img">
             <img src="${imgSrc}" alt="${hero.name}" loading="lazy"
                  onerror="this.style.display='none';this.parentElement.querySelector('.hero-fb').style.display='flex';">
@@ -377,6 +424,8 @@ export class HomePage {
 
     const imgSrc = `Resources/Characters/${hero.name}.png`;
     const godBadge = hero.isGod ? ' <span style="color:var(--gold);">★神</span>' : '';
+    const roleTag = (hero as any).role
+      ? ` <span class="hero-role-tag role-${(hero as any).role}">${(hero as any).role}</span>` : '';
     const skillsHtml = hero.skills
       ? hero.skills.map(s => `<div class="compendium-skill"><strong>${s.name}</strong>：${s.desc}</div>`).join('')
       : '<div class="compendium-skill">暂无技能描述</div>';
@@ -394,7 +443,7 @@ export class HomePage {
             <div class="char-fallback" style="display:none;width:100%;height:100%;">${hero.name.charAt(0)}</div>
           </div>
           <div class="hero-info-detail">
-            <h2>${hero.name}${godBadge}</h2>
+            <h2>${hero.name}${godBadge}${roleTag}</h2>
             <div class="hero-info-subtitle">${hero.title} · ${hero.region} · ${hero.element} · ${hero.gender === 'male' ? '♂男' : '♀女'}</div>
             <div class="hero-info-meta">
               <span class="hero-info-tag">❤ 体力上限${hero.maxHp}</span>
@@ -409,6 +458,56 @@ export class HomePage {
 
     detailOverlay.querySelector('#compendium-detail-close')!.addEventListener('click', () => detailOverlay.remove());
     detailOverlay.addEventListener('click', e => { if (e.target === detailOverlay) detailOverlay.remove(); });
+  }
+
+  // ==================== 主页设置事件 ====================
+
+  private bindHomeSettingsEvents(): void {
+    const overlay = this.overlay!;
+    const voiceMgr = VoiceManager.getInstance();
+
+    // 背景音乐开关
+    overlay.querySelector('#home-bgm-toggle')?.addEventListener('click', (e) => {
+      const toggle = e.currentTarget as HTMLElement;
+      const isOn = !toggle.classList.contains('on');
+      toggle.classList.toggle('on', isOn);
+      cacheSave('bgmEnabled', isOn, (d) => socketManager.emit('save_settings', d));
+    });
+    // 背景音乐音量
+    const bgmSlider = overlay.querySelector('#home-bgm-volume') as HTMLInputElement;
+    const bgmLabel = overlay.querySelector('#home-bgm-volume-label') as HTMLElement;
+    if (bgmSlider) {
+      bgmSlider.addEventListener('input', () => {
+        const vol = parseInt(bgmSlider.value);
+        bgmLabel.textContent = vol + '%';
+        cacheSave('bgmVolume', vol, (d) => socketManager.emit('save_settings', d));
+      });
+    }
+    // 角色语音开关
+    overlay.querySelector('#home-voice-toggle')?.addEventListener('click', (e) => {
+      const toggle = e.currentTarget as HTMLElement;
+      const isOn = !toggle.classList.contains('on');
+      toggle.classList.toggle('on', isOn);
+      voiceMgr.setEnabled(isOn);
+    });
+    // 语音音量
+    const voiceSlider = overlay.querySelector('#home-voice-volume') as HTMLInputElement;
+    const voiceLabel = overlay.querySelector('#home-voice-volume-label') as HTMLElement;
+    if (voiceSlider) {
+      voiceSlider.addEventListener('input', () => {
+        const vol = parseInt(voiceSlider.value) / 100;
+        voiceMgr.setVolume(vol);
+        voiceLabel.textContent = Math.round(vol * 100) + '%';
+      });
+    }
+    // AI出牌时间
+    const aiDelaySelect = overlay.querySelector('#home-ai-delay') as HTMLSelectElement;
+    if (aiDelaySelect) {
+      aiDelaySelect.value = String(cacheGet('aiDelay', 1600));
+      aiDelaySelect.addEventListener('change', () => {
+        cacheSave('aiDelay', parseInt(aiDelaySelect.value), (d) => socketManager.emit('save_settings', d));
+      });
+    }
   }
 
   // ==================== 退出登录 ====================
@@ -436,6 +535,10 @@ export class HomePage {
       socketManager.emit('get_profile');
       this._profileDataUnsub = socketManager.on('profile_data', (data: any) => {
         (this as any)._profileData = data;
+        // 同步 PVE 星级到内存
+        if (data?.account?.pveStars) syncPVEStarsFromServer(data.account.pveStars);
+        // 同步用户偏好设置到内存
+        if (data?.account?.settings) syncAllSettings(data.account.settings);
         // 同步到 socketManager.account，确保 currentLevelExp/nextLevelExp 随时可用
         if (data?.account && socketManager.account) {
           socketManager.setAccount({

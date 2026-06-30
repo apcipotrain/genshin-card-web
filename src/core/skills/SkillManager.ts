@@ -3,7 +3,7 @@
 // ============================================================
 
 import {
-  PlayerState, Card, CardType, EquipmentType, GameContextSnapshot, IPlayerDriver
+  PlayerState, Card, CardType, EquipmentType, GameContextSnapshot, IPlayerDriver, RoleType
 } from '../types';
 import { GameEvent } from '../types';
 import { DeckManager } from '../DeckManager';
@@ -14,6 +14,7 @@ import { getHandLimit, getRoleChineseName } from '../Player';
 import { DamageSystem } from '../DamageSystem';
 import { getDistance } from '../DistanceCalc';
 import { SuitType, ColorType, ElementType } from '../types';
+import { VoiceManager } from '../../audio/VoiceManager';
 
 export interface SkillInfo {
   id: string;
@@ -42,6 +43,8 @@ export class SkillManager {
 
   // 每个玩家的技能数据
   private playerSkillData: Map<number, any> = new Map();
+  /** 当前回合玩家的ID，用于判断技能是否可在回合内使用（如瓦雷莎-牛劲） */
+  private currentTurnPlayerId: number = -1;
 
   constructor(
     deck: DeckManager,
@@ -68,6 +71,8 @@ export class SkillManager {
 
   getSkills(player: PlayerState, ctx: GameContextSnapshot): SkillInfo[] {
     const skills: SkillInfo[] = [];
+    // 克洛琳德-剧团：禁用所有角色技能
+    if (this._clorindeTroupeActive) return skills;
     switch (player.heroId) {
       case 'venti': this.addVentiSkills(skills, player, ctx); break;
       case 'zhongli': this.addZhongliSkills(skills, player, ctx); break;
@@ -108,6 +113,19 @@ export class SkillManager {
       case 'lauma': this.addLaumaSkills(skills, player, ctx); break;
       case 'olorun': this.addOlorunSkills(skills, player, ctx); break;
       case 'citlali': this.addCitlaliSkills(skills, player, ctx); break;
+      case 'varka': this.addVarkaSkills(skills, player, ctx); break;
+      case 'albedo': this.addAlbedoSkills(skills, player, ctx); break;
+      case 'philins': this.addPhilinsSkills(skills, player, ctx); break;
+      case 'inev': this.addInevSkills(skills, player, ctx); break;
+      case 'tighnari': this.addTighnariSkills(skills, player, ctx); break;
+      case 'cyno': this.addCynoSkills(skills, player, ctx); break;
+      case 'ayato': this.addAyatoSkills(skills, player, ctx); break;
+      case 'varesa': this.addVaresaSkills(skills, player, ctx); break;
+      case 'chasca': this.addChascaSkills(skills, player, ctx); break;
+      case 'lyney': this.addLyneySkills(skills, player, ctx); break;
+      case 'navia': this.addNaviaSkills(skills, player, ctx); break;
+      case 'clorinde': this.addClorindeSkills(skills, player, ctx); break;
+      case 'sigewinne': this.addSigewinneSkills(skills, player, ctx); break;
     }
 
     // 丈八蛇矛作为额外技能
@@ -144,6 +162,8 @@ export class SkillManager {
       'jean': 2, 'klee': 2,
       'keqing': 2, 'ayaka': 2, 'ganyu': 3, 'shenhe': 2,
       'nefur': 3, 'lauma': 2, 'olorun': 2, 'citlali': 3,
+      'varka': 3, 'albedo': 1, 'philins': 2, 'inev': 2,
+      'tighnari': 2, 'cyno': 2, 'ayato': 2, 'varesa': 2, 'chasca': 2,
     };
     return skillCounts[heroId] || 0;
   }
@@ -152,6 +172,7 @@ export class SkillManager {
 
   /** 回合开始时 */
   async onTurnStart(player: PlayerState, ctx: GameContextSnapshot): Promise<void> {
+    this.currentTurnPlayerId = player.id;
     switch (player.heroId) {
       case 'zhongli': await this.zhongliContract(player, ctx); break;
       case 'nilou': await this.nilouFlowerDance(player); break;
@@ -166,6 +187,9 @@ export class SkillManager {
         }
         break;
       case 'mualani': await this.mualaniSpringCheck(player, ctx); break;
+      case 'tighnari': await this.tighnariPatrol(player, ctx); break;
+      case 'philins': this.philinsLanternCheck(player); break;
+      case 'chasca': this.chascaBeyondCheck(player); break;
     }
   }
 
@@ -184,15 +208,26 @@ export class SkillManager {
     }
   }
 
-  /** 每打出一张牌后立即触发（神里绫华-白鹭，类似张春华伤逝） */
-  async onAfterCardPlay(player: PlayerState): Promise<void> {
+  /** 每打出一张牌后立即触发（神里绫华-白鹭，伊涅芙-破镜，瓦雷莎-牛劲） */
+  async onAfterCardPlay(player: PlayerState, card?: Card): Promise<void> {
     if (player.heroId === 'ayaka') {
       await this.ayakaHeronDraw(player);
     }
+    // 伊涅芙-破镜：检查连续两张点数之和=11
+    if (player.heroId === 'inev' && card) {
+      this.inevMirrorCheck(player, card);
+    }
+    // 瓦雷莎-牛劲：前3张牌需额外弃置一张
+    if (player.heroId === 'varesa') {
+      await this.varesaBullForceDiscard(player);
+    }
+    // 林尼-奇迹：手牌首次为0时摸牌
+    this.checkLyneyMiracle(player);
   }
 
   /** 回合结束时 */
   async onTurnEnd(player: PlayerState, ctx: GameContextSnapshot): Promise<void> {
+    this.currentTurnPlayerId = -1;
     switch (player.heroId) {
       case 'mavuika': this.mavuikaLeaderCheck(player); break;
       case 'kazuha': await this.kazuhaFallenLeaves(player, ctx); break;
@@ -200,6 +235,8 @@ export class SkillManager {
       case 'ningguang': await this.ningguangXuanji(player, ctx); break;
       case 'yelan': this.yelanExtraTurnCheck(player, ctx); break;
       case 'ganyu': await this.ganyuMoonseaTurnEnd(player, ctx); break;
+      case 'varesa': this.varesaFeastEndCheck(player, ctx); break;
+      case 'chasca': this.chascaBeyondEndCheck(player); break;
     }
   }
 
@@ -218,7 +255,7 @@ export class SkillManager {
       case 'venti': await this.ventiHighSky(player); break;
       case 'furina': await this.furinaSing(player); break;
       case 'yae': await this.yaeGuji(player); break;
-      case 'dehya': await this.dehyaLionBristle(player, source); break;
+      case 'dehya': await this.dehyaLionBristle(player, source, sourceCard); break;
     }
   }
 
@@ -243,9 +280,14 @@ export class SkillManager {
     return { intercepted: false };
   }
 
-  /** 角色死亡时（胡桃-往生拿装备, 夜兰-幽客检查） */
+  /** 角色死亡时（胡桃-往生拿装备, 夜兰-幽客检查, 克洛琳德-剧团清除） */
   onPlayerDeath(deadPlayer: PlayerState): void {
     this.onHutaoRebirthEquip(deadPlayer);
+    // 克洛琳德-剧团：阵亡时解除禁技
+    if (deadPlayer.heroId === 'clorinde' && this._clorindeTroupeActive) {
+      this._clorindeTroupeActive = false;
+      this.eventBus.emit(GameEvent.Log, { message: `【剧团】${deadPlayer.name} 阵亡，技能禁用效果解除。` });
+    }
   }
 
   /** 判定牌生效后（芙宁娜-正义, 那维莱特-龙权, 莱欧斯利-狱长） */
@@ -259,6 +301,8 @@ export class SkillManager {
     if (kitName === '乐不思蜀' && !(kitName && (player as any)._ittouRedOniKit)) {
       this.wriothesleyWarden(player, effectTriggered ?? false);
     }
+    // 茜特菈莉-萨满：检查预言结果
+    this.checkCitlaliShamanResult(judgeCard.suit);
   }
 
   /** 延时锦囊效果处理完毕（荒泷一斗-赤鬼等） */
@@ -309,26 +353,27 @@ export class SkillManager {
   canDelayKitAffect(player: PlayerState, kitName: string): boolean {
     if (player.heroId === 'nahida') {
       this.eventBus.emit(GameEvent.Log, { message: `【智慧】${player.name} 免疫延时锦囊！` });
+      VoiceManager.getInstance().playSkillVoice('nahida', '智慧', player.id);
       return false;
     }
     return true;
   }
 
   /** 成为非延时锦囊目标时（哥伦比娅-少女, 荒泷一斗-天牛） */
-  onMagicTargeted(player: PlayerState, card: Card): SkillHookResult {
+  async onMagicTargeted(player: PlayerState, card: Card): Promise<SkillHookResult> {
     if (player.heroId === 'columbina' && !this.getData(player.id).lostMaiden) {
-      return this.columbinaMaidenProtect(player);
+      return await this.columbinaMaidenProtect(player);
     }
     return this.ittouHeavenlyBull(player, card);
   }
 
   /** 造成伤害时（雷电将军-无想, 胡桃-幽蝶伤害加成） */
-  async onDealingDamage(source: PlayerState, target: PlayerState, damage: number): Promise<SkillHookResult> {
+  async onDealingDamage(source: PlayerState, target: PlayerState, damage: number, sourceCard: Card | null): Promise<SkillHookResult> {
     // 胡桃幽蝶伤害加成
     const hutaoBonus = this.getHutaoDamageBonus(source);
     let finalDamage = damage + hutaoBonus;
     
-    if (source.heroId === 'raiden') {
+    if (source.heroId === 'raiden' && sourceCard && isSlash(sourceCard)) {
       return await this.raidenMusou(source, target, finalDamage);
     }
     if (hutaoBonus > 0) {
@@ -394,6 +439,7 @@ export class SkillManager {
       case 'nahida_metaphor': return await this.nahidaMetaphor(player, ctx);
       case 'mavuika_holyFire': return await this.mavuikaHolyFire(player, ctx);
       case 'kazuha_redmaple': return await this.kazuhaRedMaple(player, ctx);
+      case 'kazuha_redmaple_play': return await this.kazuhaRedMaplePlay(player, ctx);
       case 'yoimiya_firework': return await this.yoimiyaFirework(player, ctx);
       case 'yae_charm': return await this.yaeCharm(player, ctx);
       case 'xilonen_craft': return await this.xilonenCraft(player, ctx);
@@ -422,6 +468,16 @@ export class SkillManager {
       case 'lauma_frostmoon': return await this.laumaFrostmoon(player, ctx);
       case 'olorun_soul': return await this.olorunSoul(player, ctx);
       case 'olorun_flute': return await this.olorunFlute(player, ctx);
+      case 'varka_write': return await this.varkaWrite(player, ctx);
+      case 'albedo_alchemy_weapon': return await this.albedoAlchemyWeapon(player, ctx);
+      case 'albedo_alchemy_armor': return await this.albedoAlchemyArmor(player, ctx);
+      case 'ayato_head': return await this.ayatoHead(player, ctx);
+      case 'chasca_mediate': return await this.chascaMediate(player, ctx);
+      case 'lyney_magic': return await this.lyneyMagic(player, ctx);
+      case 'navia_persuade': return await this.naviaPersuade(player, ctx);
+      case 'clorinde_duel': return await this.clorindeDuel(player, ctx);
+      case 'clorinde_troupe': return await this.clorindeTroupe(player, ctx);
+      case 'sigewinne_nurse': return await this.sigewinneNurse(player, ctx);
       case 'zhanba': return false; // 丈八由EquipEffectManager处理
       default:
         // 欧洛伦-残魂：偷来的技能（格式: stolen_xxx）
@@ -479,6 +535,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【自由】，体力上限 ${oldMaxHp}→${newMaxHp}，手牌上限=${newHandLimit}`
     });
+    VoiceManager.getInstance().playSkillVoice('venti', '自由', player.id);
     return true;
   }
 
@@ -487,9 +544,10 @@ export class SkillManager {
     const deficit = handLimit - player.handCards.length;
     if (deficit > 0) {
       this.deck.drawCards(player, deficit);
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 发动【高天】，补了 ${deficit} 张手牌。`
-      });
+    this.eventBus.emit(GameEvent.Log, {
+      message: `${player.name} 发动【高天】，补了 ${deficit} 张手牌。`
+    });
+    VoiceManager.getInstance().playSkillVoice('venti', '高天', player.id);
     }
   }
 
@@ -509,6 +567,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【吟游】，将 ${cardCount} 张手牌当一张【酒】打出！`
     });
+    VoiceManager.getInstance().playSkillVoice('venti', '吟游', player.id);
     return true;
   }
 
@@ -533,9 +592,9 @@ export class SkillManager {
     skills.push({
       id: 'zhongli_leisure',
       name: '闲游',
-      description: '出牌阶段限一次，弃置1枚玉璋与场上任意一名其他角色交换座位。',
+      description: '出牌阶段限一次，弃置2枚玉璋与场上任意一名其他角色交换座位（下轮起效）。',
       type: 'active',
-      usable: (p, c) => data.jadeCount >= 1 && !data.leisureUsedThisTurn && p.id === (c.currentPlayerId),
+      usable: (p, c) => (data.jadeCount || 0) >= 2 && !data.leisureUsedThisTurn && p.id === (c.currentPlayerId),
     });
   }
 
@@ -550,6 +609,7 @@ export class SkillManager {
         this.eventBus.emit(GameEvent.Log, {
           message: `【玉璋】${p.name} 获得2枚玉璋标记（共${data.jadeCount}枚）。`
         });
+        VoiceManager.getInstance().playSkillVoice('zhongli', '玉璋', p.id);
       }
       // 代贤每轮限一次，新轮重置
       if (p.heroId === 'alhaitham') {
@@ -568,8 +628,17 @@ export class SkillManager {
     if (aliveOthers.length === 0) return false;
     if ((data.jadeCount || 0) < 1) return false; // 需要至少1枚玉璋标记
 
+    // 清理上轮契约关系
+    if (data.contractPartnerId) {
+      const oldPartner = this.allPlayers.find(p => p.id === data.contractPartnerId);
+      if (oldPartner) {
+        const oldData = this.getData(oldPartner.id);
+        oldData.contractPartnerId = undefined;
+      }
+      data.contractPartnerId = undefined;
+    }
+
     const driver = this.drivers.get(player.id)!;
-    // 先询问是否发动（可选技能）
     const useContract = await (driver as any).promptYesNo?.(
       `【契约】是否消耗1枚玉璋标记，与一名其他角色建立契约关系？（剩余${data.jadeCount || 0}枚）`
     ) ?? false;
@@ -579,11 +648,19 @@ export class SkillManager {
     if (targetId === null) return false;
     const target = aliveOthers.find(p => p.id === targetId)!;
 
+    // 钟离消耗1枚玉璋，转移给搭档
     data.jadeCount--;
+    const tData = this.getData(target.id);
+    tData.jadeCount = (tData.jadeCount || 0) + 1;
+
+    // 建立双向契约关系
     data.contractPartnerId = target.id;
+    tData.contractPartnerId = player.id;
+
     this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 与 ${target.name} 建立【契约】关系，可互相使用对方手牌。`
+      message: `${player.name} 与 ${target.name} 建立【契约】关系，可互相使用对方手牌。（${target.name}获得1枚玉璋标记）`
     });
+    VoiceManager.getInstance().playSkillVoice('zhongli', '契约', player.id);
     return true;
   }
 
@@ -591,25 +668,25 @@ export class SkillManager {
     const data = this.getData(player.id);
     const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
     if (aliveOthers.length === 0) return false;
+    if ((data.jadeCount || 0) < 2) return false;
 
     const driver = this.drivers.get(player.id)!;
     const targetId = await driver.promptTarget(player, aliveOthers.map(p => p.id), '闲游-交换座位', ctx);
     if (targetId === null) return false;
     const target = aliveOthers.find(p => p.id === targetId)!;
 
-    data.jadeCount--;
+    data.jadeCount = (data.jadeCount || 0) - 2;
     data.leisureUsedThisTurn = true;
 
-    // 迁都式交换：将钟离从当前位置移除，插入到目标位置
-    // 其他7位玩家的位置都会因此发生顺时针/逆时针变化
+    // 交换钟离与目标在allPlayers中的位置（简单swap，下轮起效）
     const pi = this.allPlayers.indexOf(player);
-    this.allPlayers.splice(pi, 1); // 移除钟离
-    const tiNew = this.allPlayers.indexOf(target); // 目标新位置
-    this.allPlayers.splice(tiNew + 1, 0, player); // 将钟离插入到目标后面（目标保持不动，其他玩家顺移）
+    const ti = this.allPlayers.indexOf(target);
+    [this.allPlayers[pi], this.allPlayers[ti]] = [this.allPlayers[ti], this.allPlayers[pi]];
 
     this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【闲游】，与 ${target.name} 交换了座位！`
+      message: `${player.name} 发动【闲游】，与 ${target.name} 交换了座位！下轮起效。`
     });
+    VoiceManager.getInstance().playSkillVoice('zhongli', '闲游', player.id);
     return true;
   }
 
@@ -623,6 +700,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `【玉璋】${player.name} 移去1枚标记抵消1点伤害。（剩余${data.jadeCount}枚）`
       });
+      VoiceManager.getInstance().playSkillVoice('zhongli', '玉璋', player.id);
     }
     return remaining;
   }
@@ -648,7 +726,7 @@ export class SkillManager {
     skills.push({
       id: 'raiden_musou',
       name: '无想',
-      description: '造成伤害时可防止此伤害获得1枚标记(上限3)；或不防止则伤害+X+1(X=标记×2)并移除所有标记。',
+      description: '当你对一名角色造成【杀】的伤害时：可防止此伤害获得1枚标记(上限3)；或不防止则伤害+X+1(X=标记×2)并移除所有标记。仅对杀生效。',
       type: 'trigger',
       usable: () => false,
     });
@@ -677,6 +755,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【御决】，令 ${t1.name} 对 ${t2.name} 发起决斗！`
     });
+    VoiceManager.getInstance().playSkillVoice('raiden', '御决', player.id);
 
     // 各摸1张牌
     this.deck.drawCards(t1, 1);
@@ -695,22 +774,38 @@ export class SkillManager {
       if (response) {
         [currentRespondent, other] = [other, currentRespondent];
       } else {
-        // 败者受到伤害
+        // 败者受到决斗伤害
         this.eventBus.emit(GameEvent.Log, {
           message: `${currentRespondent.name} 决斗失败！`
         });
         await this.damageSystem.applyHpChange(currentRespondent, -1, null, player);
-        // 对败者打出不可闪避的杀
+
+        // 可选对败者出杀（仅当败者存活且雷电将军手中有杀）
         if (!currentRespondent.isDead && player.handCards.some(c => isSlash(c))) {
-          const slashCard = player.handCards.find(c => isSlash(c))!;
-          const idx = player.handCards.indexOf(slashCard);
-          player.handCards.splice(idx, 1);
-          this.deck.sendToDiscard(slashCard);
-          this.eventBus.emit(GameEvent.Log, {
-            message: `${player.name} 对 ${currentRespondent.name} 打出 ${getCardDetail(slashCard)}（不可闪避）！`
-          });
-          // 不可闪避：直接造成伤害
-          await this.damageSystem.applyHpChange(currentRespondent, -1, slashCard, player);
+          const wantSlash = await (driver as any).promptYesNo?.(
+            `是否对 ${currentRespondent.name} 打出一张【杀】？（不可闪避）`
+          ) ?? false;
+
+          if (wantSlash) {
+            // 让玩家选择用哪一张杀
+            const slashIndices = player.handCards
+              .map((c, i) => isSlash(c) ? i : -1)
+              .filter(i => i >= 0);
+            let chosenIdx = slashIndices[0]; // 默认第一张
+            if (slashIndices.length > 1) {
+              const selected = await (driver as any).promptSelectCard?.(player, '御决-选择要打出的杀',
+                (c: Card) => isSlash(c), ctx) ?? chosenIdx;
+              if (selected >= 0) chosenIdx = selected;
+            }
+            const slashCard = player.handCards[chosenIdx];
+            player.handCards.splice(chosenIdx, 1);
+            this.deck.sendToDiscard(slashCard);
+            this.eventBus.emit(GameEvent.Log, {
+              message: `${player.name} 对 ${currentRespondent.name} 打出 ${getCardDetail(slashCard)}（不可闪避）！`
+            });
+            // 对败者造成杀的伤害（触发无想等钩子）
+            await this.damageSystem.applyHpChange(currentRespondent, -1, slashCard, player);
+          }
         }
         break;
       }
@@ -731,6 +826,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `${source.name} 发动【无想】防止了伤害，获得1枚标记（共${data.musouCount}枚）。`
       });
+      VoiceManager.getInstance().playSkillVoice('raiden', '无想', source.id);
       return { intercepted: true };
     } else {
       const bonus = musouCount * 2;
@@ -739,6 +835,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `${source.name} 发动【无想】，伤害 ${damage}→${totalDamage}，移除所有标记。`
       });
+      VoiceManager.getInstance().playSkillVoice('raiden', '无想', source.id);
       return { intercepted: false, data: { damage: totalDamage } };
     }
   }
@@ -788,21 +885,33 @@ export class SkillManager {
     const basic = player.handCards[cardIdx];
     player.handCards.splice(cardIdx, 1);
     this.deck.sendToDiscard(basic);
-    this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【囚笼】，弃置了 ${getCardDetail(basic)}，令【${card.name}】生效两次！`
-    });
+      this.eventBus.emit(GameEvent.Log, {
+        message: `${player.name} 发动【囚笼】，弃置了 ${getCardDetail(basic)}，令【${card.name}】生效两次！`
+      });
+      VoiceManager.getInstance().playSkillVoice('nahida', '囚笼', player.id);
     return true; // 调用者需要处理"生效两次"
   }
 
   private async nahidaMetaphor(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
     const data = this.getData(player.id);
-    // 手上所有锦囊牌（包括延时锦囊：乐不思蜀/兵粮寸断/闪电）
     const allMagicCards = player.handCards.filter(c => c.type === 'Magic');
     if (allMagicCards.length === 0) return false;
 
-    const chosenCardName = (ctx as any).metaphorCardName;
+    // 人类玩家通过 showMetaphorPrompt 弹窗选择后传入 ctx.metaphorCardName
+    let chosenCardName: string | null = (ctx as any).metaphorCardName ?? null;
 
-    // 弃置所有锦囊牌（无论是否选择具体牌名，都先弃牌）
+    // AI 兜底：无人类选牌时自动决定（有1血敌人→决斗，否则无中生有）
+    if (!chosenCardName) {
+      const driverAny = this.drivers.get(player.id) as any;
+      // 仅对 AI 驱动（AIDriver/DelayedAIDriver）自动决策，RemotePlayerDriver 的 promptYesNo 存在但不应走此分支
+      const isAI = driverAny && !driverAny.getNextBestCardIndex && !driverAny.promptSelectCard && driverAny.promptActiveSkill;
+      if (isAI) {
+        const enemies = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id && driverAny.isEnemy?.(player, p));
+        chosenCardName = enemies.some(e => e.hp <= 1) ? '决斗' : '无中生有';
+      }
+    }
+
+    // 弃置所有锦囊牌
     const magicCount = allMagicCards.length;
     for (const mc of allMagicCards) {
       const idx = player.handCards.indexOf(mc);
@@ -813,18 +922,17 @@ export class SkillManager {
     data.metaphorUsedThisTurn = true;
 
     if (!chosenCardName) {
-      // 用户取消选择 → 弃牌但无效果，技能仍视为已发动
       this.eventBus.emit(GameEvent.Log, {
         message: `${player.name} 发动【比喻】，弃置了 ${magicCount} 张锦囊牌（未选择目标锦囊，无额外效果）。`
       });
       return true;
     }
 
-    this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【比喻】，将 ${magicCount} 张锦囊牌当作【${chosenCardName}】使用！`
-    });
+      this.eventBus.emit(GameEvent.Log, {
+        message: `${player.name} 发动【比喻】，将 ${magicCount} 张锦囊牌当作【${chosenCardName}】使用！`
+      });
+      VoiceManager.getInstance().playSkillVoice('nahida', '比喻', player.id);
 
-    // 通过 cardEffectManager 执行所选锦囊效果
     if (this.cardEffectManager) {
       const ok = await this.cardEffectManager.executeMagicByName(chosenCardName, player);
       if (!ok) {
@@ -832,13 +940,7 @@ export class SkillManager {
           message: `【比喻】的【${chosenCardName}】无法生效（无合法目标/不可主动使用），但技能已发动。`
         });
       }
-    } else {
-      // 兜底：无 cardEffectManager 时技能仍视为已发动
-      this.eventBus.emit(GameEvent.Log, {
-        message: `【比喻】【${chosenCardName}】无效果（技能已发动）。`
-      });
     }
-
     return true;
   }
 
@@ -874,6 +976,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【正义】，获得了判定牌 ${getCardDetail(judgeCard)}`
     });
+    VoiceManager.getInstance().playSkillVoice('furina', '正义', player.id);
   }
 
   private async furinaSing(player: PlayerState): Promise<void> {
@@ -884,9 +987,25 @@ export class SkillManager {
     const judgeCard = this.deck.dealOneCard();
     if (!judgeCard) { data.singLock = false; return; }
 
+    // 发出判定动画事件
+    const isBlack = judgeCard.suit === SuitType.Spade || judgeCard.suit === SuitType.Club;
+    this.eventBus.emit(GameEvent.JudgeResult, {
+      playerId: player.id,
+      kitName: '歌颂',
+      cardName: judgeCard.name,
+      suit: judgeCard.suit,
+      number: judgeCard.number,
+      triggered: isBlack,
+      judgeIndex: 0,
+      totalJudge: 1,
+    });
+    // 那维莱特-龙权：歌颂判定后摸牌
+    this.onAfterJudge(player, judgeCard, '歌颂', isBlack);
+
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【歌颂】，判定牌：${getCardDetail(judgeCard)}`
     });
+    VoiceManager.getInstance().playSkillVoice('furina', '歌颂', player.id);
 
     if (judgeCard.suit === SuitType.Spade || judgeCard.suit === SuitType.Club) {
       // 黑色：回复1点体力，判定生效触发正义
@@ -911,9 +1030,25 @@ export class SkillManager {
     const judgeCard = this.deck.dealOneCard();
     if (!judgeCard) return { intercepted: false };
 
+    // 发出判定动画事件
+    const isRed = judgeCard.suit === SuitType.Heart || judgeCard.suit === SuitType.Diamond;
+    this.eventBus.emit(GameEvent.JudgeResult, {
+      playerId: player.id,
+      kitName: '罪舞',
+      cardName: judgeCard.name,
+      suit: judgeCard.suit,
+      number: judgeCard.number,
+      triggered: isRed,
+      judgeIndex: 0,
+      totalJudge: 1,
+    });
+    // 那维莱特-龙权：罪舞判定后摸牌
+    this.onAfterJudge(player, judgeCard, '罪舞', isRed);
+
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【罪舞】！判定牌：${getCardDetail(judgeCard)}`
     });
+    VoiceManager.getInstance().playSkillVoice('furina', '罪舞', player.id);
 
     if (judgeCard.suit === SuitType.Heart || judgeCard.suit === SuitType.Diamond) {
       // 红色：回复3点体力，判定生效触发正义
@@ -979,6 +1114,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【圣火】，将 ${getCardDetail(normalSlashes[0])} 转为【火杀】！`
     });
+    VoiceManager.getInstance().playSkillVoice('mavuika', '圣火', player.id);
     return true;
   }
 
@@ -989,6 +1125,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `${source.name} 的【圣火】触发，回复1点体力。HP: ${source.hp}/${source.maxHp}`
       });
+      VoiceManager.getInstance().playSkillVoice('mavuika', '圣火', source.id);
     }
   }
 
@@ -1003,6 +1140,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `${player.name} 的【领袖】激活！(HP ${player.hp}/${player.maxHp}，全场最高${highestCurrentHp})直到下回合开始最多受到2点伤害。`
       });
+      VoiceManager.getInstance().playSkillVoice('mavuika', '领袖', player.id);
     } else {
       data.leaderActive = false;
       data.leaderDamageTaken = 0;
@@ -1020,6 +1158,7 @@ export class SkillManager {
         this.eventBus.emit(GameEvent.Log, {
           message: `【领袖】${player.name} 累计已受 ${data.leaderDamageTaken} 点伤害，减免了 ${damage - actual} 点。`
         });
+        VoiceManager.getInstance().playSkillVoice('mavuika', '领袖', player.id);
       }
       return actual;
     }
@@ -1034,7 +1173,7 @@ export class SkillManager {
       skills.push({
         id: 'columbina_maiden',
         name: '少女',
-        description: '出牌阶段开始/结束时各减1体力上限获1枚"空月"标记。被非延时锦囊目标时可移去1枚令其无效。体力上限为1时重置为5(主公6)并失去此技能获"月神"。',
+        description: '出牌阶段开始/结束时各减1体力上限获2枚"空月"标记。被非延时锦囊目标时可主动移去1枚令其无效。体力上限为1时重置为5(主公6)并失去此技能获"月神"。',
         type: 'trigger',
         usable: () => false,
       });
@@ -1042,7 +1181,7 @@ export class SkillManager {
       skills.push({
         id: 'columbina_moon',
         name: '月神',
-        description: '每回合限一次，摸牌阶段可移去1枚"霜月"标记令摸牌数+X(X=空月标记数)，可选至多X名角色下回合摸牌-1。',
+        description: '每回合限一次，摸牌阶段可移去1枚"空月"标记令摸牌数+X(X=空月标记数)，可选至多X名角色下回合摸牌-1。',
         type: 'trigger',
         usable: () => false,
       });
@@ -1054,15 +1193,16 @@ export class SkillManager {
     if (data.lostMaiden) return;
 
     const driver = this.drivers.get(player.id)!;
-    const useIt = await (driver as any).promptYesNo?.('是否发动【少女】（出牌阶段开始时）？减少1点体力上限，获得1枚"空月"标记。');
+    const useIt = await (driver as any).promptYesNo?.('是否发动【少女】（出牌阶段开始时）？减少1点体力上限，获得2枚"空月"标记。');
     if (!useIt) return;
 
     player.maxHp -= 1;
     if (player.hp > player.maxHp) player.hp = player.maxHp;
-    data.emptyMoonCount = (data.emptyMoonCount || 0) + 1;
+    data.emptyMoonCount = (data.emptyMoonCount || 0) + 2;
     this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【少女】，体力上限-1（${player.maxHp}），获得1枚"空月"标记（共${data.emptyMoonCount}枚）。`
+      message: `${player.name} 发动【少女】，体力上限-1（${player.maxHp}），获得2枚"空月"标记（共${data.emptyMoonCount}枚）。`
     });
+    VoiceManager.getInstance().playSkillVoice('columbina', '少女', player.id);
     this.checkColumbinaTransform(player);
   }
 
@@ -1071,15 +1211,16 @@ export class SkillManager {
     if (data.lostMaiden) return;
 
     const driver = this.drivers.get(player.id)!;
-    const useIt = await (driver as any).promptYesNo?.('是否发动【少女】（出牌阶段结束时）？减少1点体力上限，获得1枚"空月"标记。');
+    const useIt = await (driver as any).promptYesNo?.('是否发动【少女】（出牌阶段结束时）？减少1点体力上限，获得2枚"空月"标记。');
     if (!useIt) return;
 
     player.maxHp -= 1;
     if (player.hp > player.maxHp) player.hp = player.maxHp;
-    data.emptyMoonCount = (data.emptyMoonCount || 0) + 1;
+    data.emptyMoonCount = (data.emptyMoonCount || 0) + 2;
     this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【少女】，体力上限-1（${player.maxHp}），获得1枚"空月"标记（共${data.emptyMoonCount}枚）。`
+      message: `${player.name} 发动【少女】，体力上限-1（${player.maxHp}），获得2枚"空月"标记（共${data.emptyMoonCount}枚）。`
     });
+    VoiceManager.getInstance().playSkillVoice('columbina', '少女', player.id);
     this.checkColumbinaTransform(player);
   }
 
@@ -1089,23 +1230,34 @@ export class SkillManager {
       const isMonarch = player.role === 'Monarch' as any;
       player.maxHp = isMonarch ? 6 : 5;
       data.lostMaiden = true;
-      data.frostMoonCount = (data.frostMoonCount || 0) + 1;
+      // 变身时保留空月标记数量不变（没有霜月概念）
       this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 的体力上限重置为${player.maxHp}，失去【少女】，获得【月神】！`
+        message: `${player.name} 的体力上限重置为${player.maxHp}，失去【少女】，获得【月神】！（空月标记：${data.emptyMoonCount || 0}枚）`
       });
     }
   }
 
-  private columbinaMaidenProtect(player: PlayerState): SkillHookResult {
+  private async columbinaMaidenProtect(player: PlayerState): Promise<SkillHookResult> {
     const data = this.getData(player.id);
-    if ((data.emptyMoonCount || 0) > 0) {
-      data.emptyMoonCount--;
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 移去1枚"空月"标记，令锦囊无效。（剩余${data.emptyMoonCount}枚）`
-      });
-      return { intercepted: true };
-    }
-    return { intercepted: false };
+    if ((data.emptyMoonCount || 0) <= 0) return { intercepted: false };
+    // 主动选择是否移去标记
+    const driver = this.drivers.get(player.id);
+    if (!driver) return { intercepted: false };
+    // 确保 promptYesNo 存在：HumanWebUIDriver/AIDriver/DelayedAIDriver/RemotePlayerDriver 均实现
+    const hasPrompt = typeof (driver as any).promptYesNo === 'function';
+    if (!hasPrompt) return { intercepted: false };
+    
+    const useIt = await (driver as any).promptYesNo(
+      `是否移去1枚"空月"标记（剩余${data.emptyMoonCount}枚）令此锦囊对你无效？`
+    );
+    if (!useIt) return { intercepted: false };
+    
+    data.emptyMoonCount--;
+    this.eventBus.emit(GameEvent.Log, {
+      message: `${player.name} 移去1枚"空月"标记，令锦囊无效。（剩余${data.emptyMoonCount}枚）`
+    });
+    VoiceManager.getInstance().playSkillVoice('columbina', '少女', player.id);
+    return { intercepted: true };
   }
 
   /** 哥伦比娅-月神：摸牌阶段+X，选择角色摸牌-1 */
@@ -1113,7 +1265,6 @@ export class SkillManager {
     const data = this.getData(player.id);
     if (!data.lostMaiden) return; // 还没变成月神
     if (data.moonUsedThisTurn) return;
-    if ((data.frostMoonCount || 0) <= 0) return;
 
     const emptyMoonCount = data.emptyMoonCount || 0;
     if (emptyMoonCount <= 0) {
@@ -1123,22 +1274,25 @@ export class SkillManager {
 
     // 询问是否发动
     const driver = this.drivers.get(player.id)!;
-    const useIt = await (driver as any).promptYesNo?.(`是否发动【月神】？移去1枚"霜月"标记，摸牌数+${emptyMoonCount}，并可令至多${emptyMoonCount}名角色下回合摸牌-1。`);
+    const useIt = await (driver as any).promptYesNo?.(`是否发动【月神】？移去1枚"空月"标记，摸牌数+${emptyMoonCount}，并可令至多${emptyMoonCount}名角色下回合摸牌-1。`);
     if (!useIt) return;
 
-    // 移去1枚霜月标记
-    data.frostMoonCount--;
+    // 移去1枚空月标记
+    data.emptyMoonCount--;
     data.moonUsedThisTurn = true;
 
     // 摸牌数+X（由GameFlowController在摸牌阶段读取）
     data.moonBonusDraw = emptyMoonCount;
 
     this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【月神】，移去1枚"霜月"标记（剩余${data.frostMoonCount}枚），摸牌数+${emptyMoonCount}！`
+      message: `${player.name} 发动【月神】，移去1枚"空月"标记（剩余${data.emptyMoonCount}枚），摸牌数+${emptyMoonCount}！`
     });
+    VoiceManager.getInstance().playSkillVoice('columbina', '月神', player.id);
 
-    // 选择至多X名其他角色下回合摸牌-1
-    const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+    // 选择至多X名敌方角色下回合摸牌-1
+    const driverAny = driver as any;
+    const aliveOthers = getAlivePlayers(this.allPlayers).filter(p =>
+      p.id !== player.id && (typeof driverAny.isEnemy === 'function' ? driverAny.isEnemy(player, p) : true));
     if (aliveOthers.length > 0) {
       const targets: PlayerState[] = [];
       let remaining = emptyMoonCount;
@@ -1195,81 +1349,88 @@ export class SkillManager {
     skills.push({
       id: 'kazuha_redmaple',
       name: '红枫',
-      description: '出牌阶段，将任意张基本牌扣置于武将牌上称为"枫"。每有一张"枫"获得效果：【杀】范围+1；【闪】摸1牌；【桃】回复+1；【酒】伤害+2。',
+      description: `出牌阶段，将一张基本牌扣置于武将牌上称为"枫"。每有一张"枫"获得效果：杀+1距、闪摸1、桃+1回复、酒+2伤。（当前${mapleLeaves.length}张）`,
       type: 'active',
       usable: (p, c) => {
         const d = this.getData(p.id);
         return p.handCards.some(card => card.type === 'Basic') && p.id === (c.currentPlayerId);
       },
     });
+    // 红枫-打出：有存枫时可单独点击打出
+    if (mapleLeaves.length > 0) {
+      skills.push({
+        id: 'kazuha_redmaple_play',
+        name: '红枫-打出',
+        description: '选择一张已扣置的"枫"牌打出，获得对应效果。',
+        type: 'active',
+        usable: (p, c) => p.id === (c.currentPlayerId),
+      });
+    }
     skills.push({
       id: 'kazuha_fallenleaves',
       name: '落叶',
-      description: `回合结束时若你有"枫"，需弃置一张"枫"将其当【顺手牵羊】或【过河拆桥】使用。（当前${mapleLeaves.length}张）`,
+      description: `回合结束时若你有"枫"，弃置一张"枫"当【顺手牵羊】或【过河拆桥】使用。（当前${mapleLeaves.length}张）`,
       type: 'trigger',
       usable: () => false,
     });
   }
 
+  /** 红枫-存牌：选择一张基本牌扣置为"枫" */
   private async kazuhaRedMaple(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
     const data = this.getData(player.id);
     if (!data.mapleLeaves) data.mapleLeaves = [];
 
     const driver = this.drivers.get(player.id)!;
     const basicCards = player.handCards.filter(c => c.type === 'Basic');
-    const hasStoredCards = data.mapleLeaves.length > 0;
 
-    if (basicCards.length === 0 && !hasStoredCards) return false;
+    if (basicCards.length === 0) return false;
 
-    // Step 1: 存牌还是打出？
-    let storeMode = true;
-    if (basicCards.length > 0 && hasStoredCards) {
-      storeMode = await driver.promptYesNo?.('【红枫】存牌还是打出已存的牌？（是=存牌，否=打出）') ?? true;
-    } else if (basicCards.length === 0 && hasStoredCards) {
-      storeMode = false;
+    const cardIdx = await driver.promptSelectCard?.(player, '红枫-选择一张基本牌扣置为"枫"',
+      c => c.type === 'Basic', ctx) ?? -1;
+    if (cardIdx < 0) return false;
+
+    const selected = player.handCards[cardIdx];
+    player.handCards.splice(cardIdx, 1);
+    data.mapleLeaves.push(selected);
+
+    this.eventBus.emit(GameEvent.Log, {
+      message: `${player.name} 发动【红枫】，将 ${getCardDetail(selected)} 扣置为"枫"。（共${data.mapleLeaves.length}张）`
+    });
+    VoiceManager.getInstance().playSkillVoice('kazuha', '红枫', player.id);
+    this._kazuhaShowEffects(data.mapleLeaves);
+    return true;
+  }
+
+  /** 红枫-打出：选择一张已存的"枫"牌打出，获得对应效果 */
+  private async kazuhaRedMaplePlay(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    if (!data.mapleLeaves || data.mapleLeaves.length === 0) return false;
+
+    // 枫牌存储在武将牌上，不在手牌中，不能用 promptSelectCard
+    // 直接取第一张打出（promptSelectCard 索引的是 handCards，不是 mapleLeaves）
+    const leaf = data.mapleLeaves[0];
+    // 严格校验：防止数组中有 undefined/null/残缺对象
+    if (!leaf || typeof leaf !== 'object' || !(leaf as any).suit) {
+      // 清理无效条目
+      if (data.mapleLeaves.length > 0) data.mapleLeaves.splice(0, 1);
+      return false;
     }
+    data.mapleLeaves.splice(0, 1);
+    this.deck.sendToDiscard(leaf);
 
-    if (storeMode) {
-      // 存牌模式：选择一张基本牌扣置为"枫"
-      const cardIdx = await driver.promptSelectCard?.(player, '红枫-选择一张基本牌扣置为"枫"',
-        c => c.type === 'Basic', ctx) ?? -1;
-      if (cardIdx < 0) return false;
+    // 创建虚拟牌并打出
+    const virtualCard: Card = {
+      ...leaf,
+      isVirtual: true,
+      cardSource: player,
+    };
 
-      const selected = player.handCards[cardIdx];
-      player.handCards.splice(cardIdx, 1);
-      data.mapleLeaves.push(selected);
+    this.eventBus.emit(GameEvent.Log, {
+      message: `${player.name} 发动【红枫】，打出了"枫" ${getCardDetail(leaf)}。`
+    });
 
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 发动【红枫】，将 ${getCardDetail(selected)} 扣置为"枫"。（共${data.mapleLeaves.length}张）`
-      });
-
-      // 显示效果汇总
-      this._kazuhaShowEffects(data.mapleLeaves);
-    } else {
-      // 打出模式：选择一张已存的"枫"牌打出
-      const leafIdx = await driver.promptSelectCard?.(player,
-        '红枫-选择一张"枫"牌打出',
-        (_card) => true, ctx) ?? -1;
-      if (leafIdx < 0) return false;
-
-      const leaf = data.mapleLeaves[leafIdx];
-      data.mapleLeaves.splice(leafIdx, 1);
-      this.deck.sendToDiscard(leaf);
-
-      // 创建虚拟牌并打出（使用 cardEffectManager 执行卡牌效果）
-      const virtualCard: Card = {
-        ...leaf,
-        isVirtual: true,
-        cardSource: player,
-      };
-
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 发动【红枫】，打出了"枫" ${getCardDetail(leaf)}。`
-      });
-
-      if (this.cardEffectManager) {
-        await this.cardEffectManager.handleActivePlay(virtualCard, player);
-      }
+    if (this.cardEffectManager) {
+      await this.cardEffectManager.handleActivePlay(virtualCard, player);
     }
 
     return true;
@@ -1296,51 +1457,52 @@ export class SkillManager {
     const data = this.getData(player.id);
     const mapleLeaves: Card[] = data.mapleLeaves || [];
     if (mapleLeaves.length === 0) return;
+    // 每回合限一次
+    if (data.fallenLeavesUsedThisTurn) return;
 
     const driver = this.drivers.get(player.id)!;
     const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+    if (aliveOthers.length === 0) return;
 
-    // 处理所有"枫"（而非仅最后一张）
-    while (mapleLeaves.length > 0) {
-      if (aliveOthers.length === 0) break;
+    // 只处理一张枫（每回合限一次）
+    const leaf = mapleLeaves.pop()!;
+    this.deck.sendToDiscard(leaf);
+    data.fallenLeavesUsedThisTurn = true;
 
-      const leaf = mapleLeaves.pop()!;
-      this.deck.sendToDiscard(leaf);
+    this.eventBus.emit(GameEvent.Log, {
+      message: `${player.name} 发动【落叶】，弃置了"枫" ${getCardDetail(leaf)}。`
+    });
 
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 发动【落叶】，弃置了"枫" ${getCardDetail(leaf)}。`
-      });
+    // 选择当作顺手牵羊还是过河拆桥
+    const asSnatch = await driver.promptYesNo?.('【落叶】是否当作【顺手牵羊】使用？（否=过河拆桥）');
+    const kitName = asSnatch ? '顺手牵羊' : '过河拆桥';
+    const targetId = await driver.promptTarget(player, aliveOthers.map(p => p.id),
+      `落叶-选择【${kitName}】目标`, ctx);
+    if (targetId === null) return;
+    const target = aliveOthers.find(p => p.id === targetId)!;
 
-      // 选择当作顺手牵羊还是过河拆桥
-      const asSnatch = await driver.promptYesNo?.('【落叶】是否当作【顺手牵羊】使用？（否=过河拆桥）');
-      const kitName = asSnatch ? '顺手牵羊' : '过河拆桥';
-      const targetId = await driver.promptTarget(player, aliveOthers.map(p => p.id), 
-        `落叶-选择【${kitName}】目标`, ctx);
-      if (targetId === null) continue;
-      const target = aliveOthers.find(p => p.id === targetId)!;
+    this.eventBus.emit(GameEvent.Log, {
+      message: `${player.name} 将"枫"化作【${kitName}】对 ${target.name} 使用！`
+    });
+    VoiceManager.getInstance().playSkillVoice('kazuha', '落叶', player.id);
 
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 将"枫"化作【${kitName}】对 ${target.name} 使用！`
-      });
-
-      if (kitName === '过河拆桥') {
-        if (target.handCards.length > 0) {
-          const rIdx = Math.floor(Math.random() * target.handCards.length);
-          const discarded = target.handCards.splice(rIdx, 1)[0];
-          this.deck.sendToDiscard(discarded);
-          this.eventBus.emit(GameEvent.Log, {
-            message: `【落叶】${player.name} 弃置了 ${target.name} 的 ${getCardDetail(discarded)}。`
-          });
-        }
-      } else {
-        if (target.handCards.length > 0) {
-          const rIdx = Math.floor(Math.random() * target.handCards.length);
-          const stolen = target.handCards.splice(rIdx, 1)[0];
-          player.handCards.push(stolen);
-          this.eventBus.emit(GameEvent.Log, {
-            message: `【落叶】${player.name} 顺走了 ${target.name} 的一张牌。`
-          });
-        }
+    if (kitName === '过河拆桥') {
+      if (target.handCards.length > 0) {
+        const rIdx = Math.floor(Math.random() * target.handCards.length);
+        const discarded = target.handCards.splice(rIdx, 1)[0];
+        this.deck.sendToDiscard(discarded);
+        this.eventBus.emit(GameEvent.Log, {
+          message: `【落叶】${player.name} 弃置了 ${target.name} 的 ${getCardDetail(discarded)}。`
+        });
+      }
+    } else {
+      if (target.handCards.length > 0) {
+        const rIdx = Math.floor(Math.random() * target.handCards.length);
+        const stolen = target.handCards.splice(rIdx, 1)[0];
+        player.handCards.push(stolen);
+        this.eventBus.emit(GameEvent.Log, {
+          message: `【落叶】${player.name} 顺走了 ${target.name} 的一张牌。`
+        });
       }
     }
   }
@@ -1355,14 +1517,12 @@ export class SkillManager {
       type: 'passive',
       usable: () => false,
     });
-    const hasFirework = this.allPlayers.some(p => !p.isDead && (this.getData(p.id).hasFireworkMark));
     skills.push({
       id: 'yoimiya_firework',
       name: '夏祭',
-      description: `弃置一张红桃牌为一名角色挂上"烟花"标记。有标记的角色使用【桃】时无效并引爆造成范围1点火伤。${hasFirework ? '（场上已有烟花）' : ''}`,
+      description: '弃置一张红桃牌为一名角色挂上"烟花"标记。有标记的角色使用【桃】时无效并引爆造成范围1点火伤。',
       type: 'active',
       usable: (p, c) => {
-        if (hasFirework) return false;
         return p.handCards.some(card => card.suit === SuitType.Heart) && p.id === (c.currentPlayerId);
       },
     });
@@ -1399,6 +1559,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【夏祭】，弃置 ${getCardDetail(selected)}，为 ${target.name} 挂上"烟花"标记！`
     });
+    VoiceManager.getInstance().playSkillVoice('yoimiya', '夏祭', player.id);
 
     return true;
   }
@@ -1468,8 +1629,20 @@ export class SkillManager {
     // 记录本次判定牌（茜特菈莉-记忆用）
     this.recordLastJudgeCard({...judgeCard});
 
-    // 第一步：茜特菈莉-记忆（用上次判定牌替换）
-    if (this.allPlayers.some(p => p.heroId === 'citlali' && !p.isDead)) {
+    // 第一步：茜特菈莉-萨满（预言花色，每轮限一次）
+    const citlali = this.allPlayers.find(p => p.heroId === 'citlali' && !p.isDead);
+    if (citlali) {
+      const cData = this.getData(citlali.id);
+      if (!cData.shamanUsedThisRound && !cData._shamanPrediction) {
+        const result = await this.citlaliShamanPredict(citlali);
+        if (result.predicted) {
+          cData._shamanPrediction = result.suit;
+        }
+      }
+    }
+
+    // 第二步：茜特菈莉-记忆（用上次判定牌替换）
+    if (citlali) {
       const citlaliResult = await this.citlaliMemoryReplace(judgeCard);
       if (citlaliResult.modified) {
         judgeCard = citlaliResult.card;
@@ -1490,66 +1663,126 @@ export class SkillManager {
     if (!hasRed && !hasBlack) return { modified: false, card: judgeCard };
 
     const driver = this.drivers.get(neuv.id)!;
+    const driverAny = driver as any;
     const ctx = this.buildContext(neuv.id);
 
-    // 询问是否发动
-    const useIt = await driver.promptYesNo?.(`【审判】是否弃置手牌修改 ${judgeTarget.name} 的判定牌？`);
+    // 判断判定目标是否是那维莱特的敌人
+    const isEnemy = typeof driverAny.isEnemy === 'function'
+      ? driverAny.isEnemy(neuv, judgeTarget) : true;
+
+    // 发出判定动画事件（包含判定牌信息）
+    this.eventBus.emit(GameEvent.JudgeResult, {
+      playerId: judgeTarget.id,
+      kitName: '审判改判',
+      cardName: judgeCard.name,
+      suit: judgeCard.suit,
+      number: judgeCard.number,
+      triggered: false,
+      judgeIndex: 0,
+      totalJudge: 1,
+    });
+
+    // 询问是否发动，并告知当前判定牌详情
+    const detail = `${getCardDetail(judgeCard)}（${judgeTarget.name}的判定牌）`;
+    const useIt = await driver.promptYesNo?.(
+      `【审判】${detail}\n是否弃置手牌修改判定？` + (isEnemy ? '（敌方，令其生效）' : '（友方，令其不生效）')
+    );
     if (!useIt) return { modified: false, card: judgeCard };
 
-    // 策略：优先用红色牌改花色为红桃（对抗乐不思蜀），其次用黑色牌改点数（对抗闪电2-9）
-    if (hasRed && judgeCard.suit !== SuitType.Heart) {
-      const cardIdx = await driver.promptSelectCard?.(neuv, '审判-选择一张红色牌弃置，改花色为♥', 
-        c => c.suit === SuitType.Heart || c.suit === SuitType.Diamond, ctx) ?? -1;
-      if (cardIdx < 0) {
-        // 玩家取消改花色，尝试改用黑色牌改点数
-        if (hasBlack && judgeCard.number >= 2 && judgeCard.number <= 9) {
-          const blackIdx = await driver.promptSelectCard?.(neuv, '审判-选择一张黑色牌弃置，改点数', 
+    // 根据敌友选择改判策略
+    if (isEnemy) {
+      // 敌方：令判定生效（乐不思蜀生效=非红桃，闪电生效=黑桃2-9）
+      // 若当前判定已生效 → 不改；若未生效 → 改成生效花色/点数
+      const currentEffective =
+        (judgeCard.suit !== SuitType.Heart) && // 乐不思蜀
+        (judgeCard.number >= 2 && judgeCard.number <= 9 && judgeCard.suit === SuitType.Spade); // 闪电
+      if (currentEffective) return { modified: false, card: judgeCard };
+
+      // 当前不生效，尝试改成生效
+      if (hasBlack) {
+        // 黑色牌 → 改点数到2-9（令闪电生效）或改花色为非红桃
+        if (judgeCard.suit === SuitType.Heart) {
+          // 乐不思蜀判定为红桃(不生效) → 用黑色牌改花色为黑桃
+          const cardIdx = await driver.promptSelectCard?.(neuv,
+            '审判-选择一张黑色牌弃置，改花色为♠（令敌方生效）',
             c => c.suit === SuitType.Spade || c.suit === SuitType.Club, ctx) ?? -1;
-          if (blackIdx >= 0) {
-            const blackCard = neuv.handCards[blackIdx];
-            neuv.handCards.splice(blackIdx, 1);
+          if (cardIdx >= 0) {
+            const blackCard = neuv.handCards.splice(cardIdx, 1)[0];
             this.deck.sendToDiscard(blackCard);
-            const safeNumbers = [1, 10, 11, 12, 13];
-            judgeCard.number = safeNumbers[Math.floor(Math.random() * safeNumbers.length)];
+            judgeCard.suit = SuitType.Spade;
             this.eventBus.emit(GameEvent.Log, {
-              message: `${neuv.name} 发动【审判】，弃置 ${getCardDetail(blackCard)}，将判定牌点数改为${judgeCard.number}！`
+              message: `${neuv.name} 发动【审判】，弃置 ${getCardDetail(blackCard)}，将花色改为♠（令敌方生效）！`
             });
+            VoiceManager.getInstance().playSkillVoice('neuvillette', '审判', neuv.id);
+            return { modified: true, card: judgeCard };
+          }
+        } else if (judgeCard.number < 2 || judgeCard.number > 9) {
+          // 闪电判定不在2-9(不生效) → 用黑色牌改点数到2-9
+          const cardIdx = await driver.promptSelectCard?.(neuv,
+            '审判-选择一张黑色牌弃置，改点数为2-9（令敌方闪电生效）',
+            c => c.suit === SuitType.Spade || c.suit === SuitType.Club, ctx) ?? -1;
+          if (cardIdx >= 0) {
+            const blackCard = neuv.handCards.splice(cardIdx, 1)[0];
+            this.deck.sendToDiscard(blackCard);
+            judgeCard.number = 2 + Math.floor(Math.random() * 8);
+            this.eventBus.emit(GameEvent.Log, {
+              message: `${neuv.name} 发动【审判】，弃置 ${getCardDetail(blackCard)}，将点数改为${judgeCard.number}（令敌方生效）！`
+            });
+            VoiceManager.getInstance().playSkillVoice('neuvillette', '审判', neuv.id);
             return { modified: true, card: judgeCard };
           }
         }
-        return { modified: false, card: judgeCard };
       }
-      const redCard = neuv.handCards[cardIdx];
-      neuv.handCards.splice(cardIdx, 1);
-      this.deck.sendToDiscard(redCard);
-      judgeCard.suit = SuitType.Heart;
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${neuv.name} 发动【审判】，弃置 ${getCardDetail(redCard)}，将判定牌花色改为♥！`
-      });
-      return { modified: true, card: judgeCard };
-    }
+    } else {
+      // 友方：令判定不生效（乐不思蜀不生效=红桃，闪电不生效=非黑桃或非2-9）
+      const currentIneffective =
+        (judgeCard.suit === SuitType.Heart) || // 乐不思蜀不生效
+        (judgeCard.number < 2 || judgeCard.number > 9 || judgeCard.suit !== SuitType.Spade); // 闪电不生效
+      if (currentIneffective) return { modified: false, card: judgeCard };
 
-    // 次选：用黑色牌改点数（避开闪电2-9）
-    if (hasBlack && judgeCard.number >= 2 && judgeCard.number <= 9) {
-      const cardIdx = await driver.promptSelectCard?.(neuv, '审判-选择一张黑色牌弃置，改点数', 
-        c => c.suit === SuitType.Spade || c.suit === SuitType.Club, ctx) ?? -1;
-      if (cardIdx < 0) return { modified: false, card: judgeCard };
-      const blackCard = neuv.handCards[cardIdx];
-      neuv.handCards.splice(cardIdx, 1);
-      this.deck.sendToDiscard(blackCard);
-      const safeNumbers = [1, 10, 11, 12, 13];
-      judgeCard.number = safeNumbers[Math.floor(Math.random() * safeNumbers.length)];
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${neuv.name} 发动【审判】，弃置 ${getCardDetail(blackCard)}，将判定牌点数改为${judgeCard.number}！`
-      });
-      return { modified: true, card: judgeCard };
+      // 当前生效，尝试改成不生效
+      if (hasRed && judgeCard.suit !== SuitType.Heart) {
+        // 红桃令乐不思蜀不生效
+        const cardIdx = await driver.promptSelectCard?.(neuv,
+          '审判-选择一张红色牌弃置，改花色为♥（令友方不生效）',
+          c => c.suit === SuitType.Heart || c.suit === SuitType.Diamond, ctx) ?? -1;
+        if (cardIdx >= 0) {
+          const redCard = neuv.handCards.splice(cardIdx, 1)[0];
+          this.deck.sendToDiscard(redCard);
+          judgeCard.suit = SuitType.Heart;
+          this.eventBus.emit(GameEvent.Log, {
+            message: `${neuv.name} 发动【审判】，弃置 ${getCardDetail(redCard)}，将花色改为♥（令友方不生效）！`
+          });
+          VoiceManager.getInstance().playSkillVoice('neuvillette', '审判', neuv.id);
+          return { modified: true, card: judgeCard };
+        }
+      }
+      if (hasBlack && judgeCard.suit === SuitType.Spade && judgeCard.number >= 2 && judgeCard.number <= 9) {
+        // 闪电在2-9生效 → 用黑色牌改点数到安全值
+        const cardIdx = await driver.promptSelectCard?.(neuv,
+          '审判-选择一张黑色牌弃置，改点数避开2-9（令友方不生效）',
+          c => c.suit === SuitType.Spade || c.suit === SuitType.Club, ctx) ?? -1;
+        if (cardIdx >= 0) {
+          const blackCard = neuv.handCards.splice(cardIdx, 1)[0];
+          this.deck.sendToDiscard(blackCard);
+          const safeNumbers = [1, 10, 11, 12, 13];
+          judgeCard.number = safeNumbers[Math.floor(Math.random() * safeNumbers.length)];
+          this.eventBus.emit(GameEvent.Log, {
+            message: `${neuv.name} 发动【审判】，弃置 ${getCardDetail(blackCard)}，将点数改为${judgeCard.number}（令友方不生效）！`
+          });
+          VoiceManager.getInstance().playSkillVoice('neuvillette', '审判', neuv.id);
+          return { modified: true, card: judgeCard };
+        }
+      }
     }
 
     return { modified: false, card: judgeCard };
   }
 
-  /** 那维莱特-龙权：判定后摸牌 */
+  /** 那维莱特-龙权：判定生效时摸牌 */
   private neuvilletteDragonAuthority(judgeCard: Card, kitName: string, effectTriggered: boolean): void {
+    // 龙权只在判定生效（延时锦囊生效）时触发
+    if (!effectTriggered) return;
     const neuv = this.allPlayers.find(p => !p.isDead && p.heroId === 'neuvillette');
     if (!neuv) return;
     const data = this.getData(neuv.id);
@@ -1559,6 +1792,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${neuv.name} 发动【龙权】，摸1张牌。`
     });
+    VoiceManager.getInstance().playSkillVoice('neuvillette', '龙权', neuv.id);
   }
 
   // ======================== 八重神子技能 ========================
@@ -1602,76 +1836,67 @@ export class SkillManager {
     data.charmUsedThisTurn = true;
 
     // t1选择：对t2使用杀 或 交给八重一张牌
-    const t1Driver = this.drivers.get(t1.id)!;
-    const isT1Human = t1.id === 1; // 玩家1是人类
-    let choice: number;
+    await this.yaeCharmResolve(player, t1, t2);
+    // t2选择：对t1使用杀 或 交给八重一张牌
+    await this.yaeCharmResolve(player, t2, t1);
 
-    if (isT1Human) {
-      // 人类玩家默认选择出杀（选项0）
-      choice = 0;
+    return true;
+  }
+
+  /** 狐魅子处理：单人选择出杀或交牌 */
+  private async yaeCharmResolve(player: PlayerState, actor: PlayerState, target: PlayerState): Promise<void> {
+    const driver = this.drivers.get(actor.id)!;
+    const hasSlashCard = actor.handCards.some(c => isSlash(c));
+    const driverAny = driver as any;
+    const actorIsEnemyOfTarget = typeof driverAny.isEnemy === 'function'
+      ? driverAny.isEnemy(actor, target)
+      : true;
+
+    let choice: number;
+    if (hasSlashCard && actorIsEnemyOfTarget) {
+      choice = 0; // 出杀造成伤害
+    } else if (hasSlashCard && target.hp <= 1) {
+      choice = 0; // 目标残血，出杀收割
+    } else if (actor.handCards.length >= 3) {
+      choice = 1; // 手牌多，交一张给八重
     } else {
-      // AI 智能选择：
-      // - 有杀且t2是敌人/手牌少 → 出杀（选项0）
-      // - 没杀或t2是盟友且手牌多 → 交牌（选项1）
-      const hasSlashCard = t1.handCards.some(c => isSlash(c));
-      const t1DriverAny = t1Driver as any;
-      // 判断t2是否为t1的敌人
-      const t1IsEnemy = typeof t1DriverAny.isEnemy === 'function'
-        ? t1DriverAny.isEnemy(t1, t2)
-        : true; // 默认视为敌人
-      
-      if (hasSlashCard && t1IsEnemy) {
-        choice = 0; // 出杀造成伤害
-      } else if (hasSlashCard && t2.hp <= 1) {
-        choice = 0; // t2残血，出杀收割
-      } else if (t1.handCards.length >= 3) {
-        choice = 1; // 手牌多，交一张给八重（可能是盟友）
-      } else {
-        choice = hasSlashCard ? 0 : 1;
-      }
+      choice = hasSlashCard ? 0 : 1;
     }
 
     if (choice === 0) {
-      // 对t2使用一张杀
       this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 发动【狐魅】！${t1.name} 选择对 ${t2.name} 使用一张【杀】。`
+        message: `${player.name} 发动【狐魅】！${actor.name} 选择对 ${target.name} 使用一张【杀】。`
       });
-      const slash = t1.handCards.find(c => isSlash(c));
+      VoiceManager.getInstance().playSkillVoice('yae', '狐魅', player.id);
+      const slash = actor.handCards.find(c => isSlash(c));
       if (slash) {
-        const idx = t1.handCards.indexOf(slash);
-        t1.handCards.splice(idx, 1);
+        const idx = actor.handCards.indexOf(slash);
+        actor.handCards.splice(idx, 1);
         this.deck.sendToDiscard(slash);
-        // 杀不可闪避（狐魅效果）
-        await this.damageSystem.applyHpChange(t2, -1, slash, t1);
+        await this.damageSystem.applyHpChange(target, -1, slash, actor);
       } else {
-        this.eventBus.emit(GameEvent.Log, { message: `${t1.name} 没有【杀】可用。` });
+        this.eventBus.emit(GameEvent.Log, { message: `${actor.name} 没有【杀】可用。` });
       }
     } else {
-      // 交给八重一张牌
       this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 发动【狐魅】！${t1.name} 选择交给 ${player.name} 一张牌。`
+        message: `${player.name} 发动【狐魅】！${actor.name} 选择交给 ${player.name} 一张牌。`
       });
-      if (t1.handCards.length > 0) {
-        // AI优先给价值最低的牌
+      VoiceManager.getInstance().playSkillVoice('yae', '狐魅', player.id);
+      if (actor.handCards.length > 0) {
         const priority: Record<string, number> = {
           '桃': 10, '无懈可击': 9, '酒': 8, '闪': 7,
           '杀': 5, '火杀': 5, '雷杀': 5,
         };
         let worstIdx = 0;
         let worstScore = Infinity;
-        for (let i = 0; i < t1.handCards.length; i++) {
-          const score = priority[t1.handCards[i].name] ?? 3;
-          if (score < worstScore) {
-            worstScore = score;
-            worstIdx = i;
-          }
+        for (let i = 0; i < actor.handCards.length; i++) {
+          const score = priority[actor.handCards[i].name] ?? 3;
+          if (score < worstScore) { worstScore = score; worstIdx = i; }
         }
-        const card = t1.handCards.splice(worstIdx, 1)[0];
+        const card = actor.handCards.splice(worstIdx, 1)[0];
         player.handCards.push(card);
       }
     }
-
-    return true;
   }
 
   private async yaeGuji(player: PlayerState): Promise<void> {
@@ -1683,30 +1908,86 @@ export class SkillManager {
     }
     if (topCards.length === 0) return;
 
+    // 日志播报（带花色点数）
+    const cardList = topCards.map(c => getCardDetail(c)).join('、');
     this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【宫司】，观看牌堆顶${topCards.length}张牌。`
+      message: `${player.name} 发动【宫司】，观看牌堆顶：${cardList}。选择1张放回，剩余收入手牌。`
+    });
+    VoiceManager.getInstance().playSkillVoice('yae', '宫司', player.id);
+
+    const driver = this.drivers.get(player.id);
+    const driverAny = driver as any;
+
+    // 选1张放回牌堆顶
+    let returnIdx = 0;
+    if (topCards.length > 1) {
+      returnIdx = await driverAny.promptSelectCard?.(
+        player, topCards,  // 旧式重载：直接传牌数组
+        this.buildContext(player.id)
+      ) ?? 0;
+      if (returnIdx < 0 || returnIdx >= topCards.length) returnIdx = 0;
+    }
+    const returned = topCards.splice(returnIdx, 1)[0];
+    this.deck.returnToDrawPile([returned]);
+
+    // 剩余牌收入手牌
+    for (const c of topCards) {
+      player.handCards.push(c);
+    }
+    this.eventBus.emit(GameEvent.Log, {
+      message: `${player.name} 将 ${topCards.length} 张牌收入手牌。`
     });
 
-    // 放回1张
-    const keep = topCards.shift()!;
-    this.deck.returnToDrawPile([keep]);
-
-    // 剩下2张交给任意角色
-    const alivePlayers = getAlivePlayers(this.allPlayers);
-    if (alivePlayers.length > 0 && topCards.length > 0) {
-      const target = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
-      for (const c of topCards) {
-        target.handCards.push(c);
-      }
-      this.eventBus.emit(GameEvent.Log, {
-        message: `${player.name} 将 ${topCards.length} 张牌交给了 ${target.name}。`
-      });
-      if (target.id !== player.id) {
-        const tData = this.getData(target.id);
-        tData.extraSlashCount = (tData.extraSlashCount || 0) + 1;
-        this.eventBus.emit(GameEvent.Log, {
-          message: `${target.name} 下个出牌阶段杀次数上限+1！`
-        });
+    // 玩家选择交给其他角色的牌和数量
+    if (topCards.length > 0 && topCards.length <= player.handCards.length) {
+      const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+      if (aliveOthers.length > 0) {
+        const giveCount = await driverAny.promptYesNo?.('【宫司】是否将部分手牌交给其他角色？（选"否"保留全部）') ?? false;
+        if (giveCount) {
+          // 选出要交出的牌
+          const giveCards: Card[] = [];
+          let keepGoing = true;
+          while (keepGoing && giveCards.length < topCards.length) {
+            const filteredTopCards = topCards.filter(c => !giveCards.some(g => g.id === c.id));
+            const topCardIdx = await driverAny.promptSelectCard?.(
+              player, filteredTopCards,
+              this.buildContext(player.id)
+            ) ?? -1;
+            if (topCardIdx < 0 || topCardIdx >= filteredTopCards.length) { keepGoing = false; break; }
+            const selectedCard = filteredTopCards[topCardIdx];
+            // 在手牌中找到对应卡牌（topCards已被推入手牌，通过id匹配）
+            const handIdx = player.handCards.findIndex(c => c.id === selectedCard.id);
+            if (handIdx < 0) { keepGoing = false; break; }
+            giveCards.push(selectedCard);
+            player.handCards.splice(handIdx, 1);
+            if (giveCards.length < topCards.length) {
+              keepGoing = await driverAny.promptYesNo?.('【宫司】继续选牌交给他人？') ?? false;
+            } else {
+              keepGoing = false;
+            }
+          }
+          if (giveCards.length > 0) {
+            const targetId = await driver?.promptTarget(player, aliveOthers.map(p => p.id), '【宫司】将选出的牌交给哪位角色？', this.buildContext(player.id));
+            let target: PlayerState | null = null;
+            if (targetId !== null && targetId !== undefined) {
+              target = aliveOthers.find(p => p.id === targetId) || null;
+            }
+            if (target) {
+              for (const c of giveCards) target.handCards.push(c);
+              this.eventBus.emit(GameEvent.Log, {
+                message: `${player.name} 将 ${giveCards.length} 张牌交给了 ${target.name}。`
+              });
+              const tData = this.getData(target.id);
+              tData.extraSlashCount = (tData.extraSlashCount || 0) + 1;
+              this.eventBus.emit(GameEvent.Log, {
+                message: `${target.name} 下个出牌阶段杀次数上限+1！`
+              });
+            } else {
+              // 取消则归还
+              for (const c of giveCards) player.handCards.push(c);
+            }
+          }
+        }
       }
     }
   }
@@ -1739,10 +2020,8 @@ export class SkillManager {
 
   private async xilonenCraft(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
     const data = this.getData(player.id);
-    // 失去1点体力（体力流失）
-    await this.damageSystem.applyHealthLoss(player, 1, player.name);
 
-    // 选择装备区有牌的角色
+    // 先检查是否有装备区有牌的角色
     const targets = getAlivePlayers(this.allPlayers).filter(p => {
       return Object.values(p.equipZone).some(v => v !== null && (v as any).name);
     });
@@ -1750,6 +2029,9 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, { message: `${player.name} 发动【工匠】，但没有角色有装备。` });
       return false;
     }
+
+    // 确认有目标后，再失去1点体力（体力流失）
+    await this.damageSystem.applyHealthLoss(player, 1, player.name);
 
     const driver = this.drivers.get(player.id)!;
     const targetId = await driver.promptTarget(player, targets.map(p => p.id), '工匠-选择有装备的角色', ctx);
@@ -1774,6 +2056,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【工匠】，失去1点体力，选择${target.name}（装备数${equipCount}），摸${equipCount}张牌。`
     });
+    VoiceManager.getInstance().playSkillVoice('xilonen', '工匠', player.id);
 
     // 选择X张手牌作为装备复制品，装备给任意角色
     if (player.handCards.length >= equipCount && equipCount > 0) {
@@ -1909,6 +2192,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【祝福】，${target.name} 下回合摸牌数+${bonus}。`
     });
+    VoiceManager.getInstance().playSkillVoice('xilonen', '祝福', player.id);
     return true;
   }
 
@@ -1931,9 +2215,10 @@ export class SkillManager {
     const primes = new Set([2, 3, 5, 7, 11, 13]);
     if (primes.has(cardsPlayedThisPhase) && card.number === cardsPlayedThisPhase) {
       this.deck.drawCards(player, cardsPlayedThisPhase);
-      this.eventBus.emit(GameEvent.Log, {
-        message: `【三尸】${player.name} 使用的第${cardsPlayedThisPhase}张牌点数为${card.number}（质数），摸${cardsPlayedThisPhase}张牌！`
-      });
+        this.eventBus.emit(GameEvent.Log, {
+          message: `【三尸】${player.name} 使用的第${cardsPlayedThisPhase}张牌点数为${card.number}（质数），摸${cardsPlayedThisPhase}张牌！`
+        });
+        VoiceManager.getInstance().playSkillVoice('zibai', '三尸', player.id);
     }
   }
 
@@ -1948,6 +2233,7 @@ export class SkillManager {
         this.eventBus.emit(GameEvent.Log, {
           message: `【三尸】${player.name} 打出第${cardsPlayedThisPhase}张牌（5的倍数），获得1枚玉璋标记（共${data.jadeCount}枚）。`
         });
+        VoiceManager.getInstance().playSkillVoice('zibai', '三尸', player.id);
       }
     }
   }
@@ -2044,6 +2330,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `【狱长】${wrio.name} 对 ${judgeTarget.name} 造成1点伤害！`
       });
+      VoiceManager.getInstance().playSkillVoice('wriothesley', '狱长', wrio.id);
       // 使用damageSystem直接调用
       this.damageSystem.applyHpChange(judgeTarget, -1, null, wrio);
     } else {
@@ -2092,6 +2379,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【公爵】，将 ${getCardDetail(selected)} 当【乐不思蜀】对 ${target.name} 使用！`
     });
+    VoiceManager.getInstance().playSkillVoice('wriothesley', '公爵', player.id);
     return true;
   }
 
@@ -2126,9 +2414,10 @@ export class SkillManager {
     const cards = [...dyingPlayer.handCards];
     dyingPlayer.handCards = [];
     hutao.handCards.push(...cards);
-    this.eventBus.emit(GameEvent.Log, {
-      message: `【往生】${hutao.name} 获得了 ${dyingPlayer.name} 的 ${cards.length} 张手牌！`
-    });
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【往生】${hutao.name} 获得了 ${dyingPlayer.name} 的 ${cards.length} 张手牌！`
+      });
+      VoiceManager.getInstance().playSkillVoice('hutao', '往生', hutao.id);
   }
 
   /** 胡桃-往生：死亡时拿装备 */
@@ -2145,6 +2434,7 @@ export class SkillManager {
         this.eventBus.emit(GameEvent.Log, {
           message: `【往生】${hutao.name} 获得了 ${deadPlayer.name} 的装备 ${equip.name}！`
         });
+        VoiceManager.getInstance().playSkillVoice('hutao', '往生', hutao.id);
       }
     }
   }
@@ -2160,10 +2450,11 @@ export class SkillManager {
     data.butterflyActive = true;
     data.butterflyKilledThisTurn = false;
 
-    this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【幽蝶】，体力流失至1点，造成的所有伤害+1！`
-    });
-    return true;
+      this.eventBus.emit(GameEvent.Log, {
+        message: `${player.name} 发动【幽蝶】，体力流失至1点，造成的所有伤害+1！`
+      });
+      VoiceManager.getInstance().playSkillVoice('hutao', '幽蝶', player.id);
+      return true;
   }
 
   /** 胡桃-幽蝶：伤害加成 */
@@ -2249,11 +2540,15 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【七星】${player.name} 与 ${target.name} 各回复2点体力，获得2枚玉璋标记！`
     });
+    VoiceManager.getInstance().playSkillVoice('ningguang', '七星', player.id);
     return true;
   }
 
   private async ningguangHeaven(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
     const data = this.getData(player.id);
+    // 提前标记已使用，防止牌堆不足或目标取消时AI在循环中反复重试
+    data.heavenUsedThisTurn = true;
+
     const topCards: Card[] = [];
     for (let i = 0; i < 3; i++) {
       const c = this.deck.dealOneCard();
@@ -2271,68 +2566,80 @@ export class SkillManager {
     if (targetId === null) { this.deck.returnToDrawPile(topCards); return false; }
     const target = aliveOthers.find(p => p.id === targetId)!;
 
-    data.heavenUsedThisTurn = true;
-
-    // 显示牌面（简化日志）
-    const cardDescs = topCards.map(c => getCardDetail(c)).join(', ');
-    this.eventBus.emit(GameEvent.Log, {
-      message: `【天权】${player.name} 展示牌堆顶3张：${cardDescs}，${target.name} 需猜花色。`
-    });
-
-    // AI：逐张随机猜花色（每张独立1/4概率猜对）
-    // 对于真人玩家，需要通过UI交互
+    // 目标对每张牌花色进行猜测
     const suitNames: Record<string, string> = {
-      [SuitType.Spade]: '♠',
-      [SuitType.Heart]: '♥',
-      [SuitType.Club]: '♣',
-      [SuitType.Diamond]: '♦'
+      [SuitType.Spade]: '♠', [SuitType.Heart]: '♥', [SuitType.Club]: '♣', [SuitType.Diamond]: '♦'
     };
     const suits = Object.values(SuitType).filter(s => s !== SuitType.None);
+    const tgtDriver = this.drivers.get(target.id);
+    const tgtDriverAny = tgtDriver as any;
     
     let wrongCount = 0;
     const guesses: string[] = [];
-    for (const card of topCards) {
-      const correctSuit = card.suit;
-      const guess = suits[Math.floor(Math.random() * suits.length)];
+    for (let ci = 0; ci < topCards.length; ci++) {
+      const correctSuit = topCards[ci].suit;
+      let guess = '';
+      // 逐花色询问（AI默认随机选一个）
+      if (typeof tgtDriverAny?.promptYesNo === 'function') {
+        for (const s of suits) {
+          const yes = await tgtDriverAny.promptYesNo(`【天权】第${ci+1}张牌是 ${suitNames[s]} 吗？`);
+          if (yes) { guess = s; break; }
+        }
+      }
+      if (!guess) guess = suits[Math.floor(Math.random() * suits.length)];
       guesses.push(guess);
       if (guess !== correctSuit) wrongCount++;
     }
 
-    // 凝光视角显示猜测详情，其他人只显示结果
-    const guessDetail = guesses.map((g, i) => {
-      const actual = topCards[i].suit; // 使用实际花色变量
-      return `第${i+1}张猜${suitNames[g]}`;
-    }).join('，');
+    // ========== 公开播报 ==========
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【天权】${player.name} 对 ${target.name} 发动天权，翻开牌堆顶3张牌令其猜测花色！`
+      });
+      VoiceManager.getInstance().playSkillVoice('ningguang', '天权', player.id);
+
+      // ========== 凝光专用播报：显示3张牌详情 + 对方每张猜的花色 ==========
+    const cardDetails = topCards.map(c => getCardDetail(c)).join('，');
+    const targetGuessDetail = guesses.map((g, i) => `第${i+1}张猜${suitNames[g]}`).join('；');
     this.eventBus.emit(GameEvent.Log, {
-      message: `${target.name} 猜测花色：${guessDetail}（实际：${cardDescs}）`,
-      visibleTo: [player.id]  // 仅凝光可见
+      message: `【天权】牌堆顶3张：${cardDetails}。${target.name} 猜测：${targetGuessDetail}。猜错${wrongCount}张。`,
+      visibleTo: [player.id]
     });
 
-    // 公开日志：仅显示猜错数量
-    this.eventBus.emit(GameEvent.Log, {
-      message: `【天权】${target.name} 猜错了 ${wrongCount} 张牌的花色！`
-    });
-
+    // ========== 结果描述 ==========
+    let effectDesc = '';
     if (wrongCount === 3) {
       target.skipDrawPhase = true;
-      this.eventBus.emit(GameEvent.Log, { message: `${target.name} 跳过下个摸牌阶段！` });
+      effectDesc = '跳过下个摸牌阶段';
+      this.eventBus.emit(GameEvent.Log, { message: `${target.name} 全猜错！跳过下个摸牌阶段。` });
     } else if (wrongCount === 2) {
       await this.damageSystem.applyHealthLoss(target, 1, target.name);
-      this.eventBus.emit(GameEvent.Log, { message: `${target.name} 流失1点体力。` });
+      effectDesc = '流失1点体力';
+      this.eventBus.emit(GameEvent.Log, { message: `${target.name} 猜错2张，流失1点体力。` });
     } else if (wrongCount === 1) {
-      // 获得点数最大的牌
       const maxCard = topCards.reduce((a, b) => a.number > b.number ? a : b);
       target.handCards.push(maxCard);
       const idx = topCards.indexOf(maxCard);
       topCards.splice(idx, 1);
-      this.eventBus.emit(GameEvent.Log, { message: `${target.name} 获得 ${getCardDetail(maxCard)}。` });
+      effectDesc = `获得${getCardDetail(maxCard)}`;
+      this.eventBus.emit(GameEvent.Log, { message: `${target.name} 猜错1张，获得点数最大的牌 ${getCardDetail(maxCard)}。` });
     } else {
-      // 全对：获得3张牌+回1点体力
       target.handCards.push(...topCards);
       target.hp = Math.min(target.maxHp, target.hp + 1);
+      effectDesc = '获得3张牌并回复1点体力';
       this.eventBus.emit(GameEvent.Log, { message: `${target.name} 全猜对！获得3张牌并回复1点体力。` });
       return true; // 牌已分配
     }
+
+    // ========== 目标专用播报：自己猜了什么花色 + 受到什么效果 ==========
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【天权】你猜测的花色：${targetGuessDetail}。猜错${wrongCount}张，${effectDesc}。`,
+      visibleTo: [target.id]
+    });
+
+    // ========== 公开结果播报（凝光和目标之外的人只看到这个） ==========
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【天权】${target.name} 猜错${wrongCount}张，${effectDesc}。`
+    });
 
     // 弃置剩余牌
     for (const c of topCards) {
@@ -2344,16 +2651,16 @@ export class SkillManager {
   private async ningguangXuanji(player: PlayerState, ctx: GameContextSnapshot): Promise<void> {
     if (player.handCards.length === 0) return;
     const driver = this.drivers.get(player.id)!;
-    // 先询问是否发动
-    const doIt = await (driver as any).promptYesNo?.('是否发动【璇玑】？选择一张手牌置于牌堆顶（可取消）。');
-    if (!doIt) return;
-    const cardIdx = await driver.promptSelectCard?.(player, '璇玑-选择一张手牌置于牌堆顶', c => true, ctx) ?? -1;
+    const driverAny = driver as any;
+    // 直接选牌，选则发动，取消 = -1 不发动（旧式重载无需 filter 回调，PVP兼容）
+    const cardIdx = await driverAny.promptSelectCard?.(player, '【璇玑】选择一张手牌置于牌堆顶（点取消跳过）', (_c: Card) => true, ctx) ?? -1;
     if (cardIdx < 0) return;
     const card = player.handCards.splice(cardIdx, 1)[0];
     this.deck.returnToDrawPile([card]);
     this.eventBus.emit(GameEvent.Log, {
       message: `【璇玑】${player.name} 将一张牌置于牌堆顶。`
     });
+    VoiceManager.getInstance().playSkillVoice('ningguang', '璇玑', player.id);
   }
 
   // ======================== 艾尔海森技能 ========================
@@ -2370,12 +2677,13 @@ export class SkillManager {
     skills.push({
       id: 'alhaitham_knowledge',
       name: '知论',
-      description: `出牌阶段限两次，可将一张手牌置于武将牌上，这些牌可当【无懈可击】使用。（当前${(data.knowledgeCards || []).length}张）`,
+      description: `出牌阶段限两次，可将一张手牌置于武将牌上（上限2张），这些牌可当【无懈可击】使用。（当前${(data.knowledgeCards || []).length}张）`,
       type: 'active',
       usable: (p, c) => {
         const d = this.getData(p.id);
         const count = d.knowledgeUsedThisTurn || 0;
-        return count < 2 && p.handCards.length > 0 && p.id === (c.currentPlayerId);
+        const totalStored = (d.knowledgeCards || []).length;
+        return count < 2 && totalStored < 2 && p.handCards.length > 0 && p.id === (c.currentPlayerId);
       },
     });
     skills.push({
@@ -2395,7 +2703,8 @@ export class SkillManager {
   private async alhaithamKnowledge(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
     const data = this.getData(player.id);
     const count = data.knowledgeUsedThisTurn || 0;
-    if (count >= 2 || player.handCards.length === 0) return false;
+    const totalStored = (data.knowledgeCards || []).length;
+    if (count >= 2 || totalStored >= 2 || player.handCards.length === 0) return false;
 
     const driver = this.drivers.get(player.id)!;
     const cardIdx = await driver.promptSelectCard?.(player, '知论-选择一张手牌扣置于武将牌上', c => true, ctx) ?? -1;
@@ -2409,6 +2718,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【知论】，将 ${getCardDetail(card)} 置于武将牌上（共${data.knowledgeCards.length}张）。`
     });
+    VoiceManager.getInstance().playSkillVoice('alhaitham', '知论', player.id);
     return true;
   }
 
@@ -2455,6 +2765,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `${alhaitham.name} 发动【代贤】，获得了【${magicCard.name}】。`
       });
+      VoiceManager.getInstance().playSkillVoice('alhaitham', '代贤', alhaitham.id);
       return true;
     }
     return false;
@@ -2469,14 +2780,14 @@ export class SkillManager {
     skills.push({
       id: 'xiao_goldenwing',
       name: '金鹏',
-      description: '锁定技：当其他角色对你使用【杀】时，须额外使用一张颜色不同的【杀】，否则此【杀】对你无效。',
+      description: '锁定技：当其他角色对你使用【杀】时，须额外使用一张花色不同的【杀】，否则此【杀】对你无效。',
       type: 'passive',
       usable: () => false,
     });
     skills.push({
       id: 'xiao_demontamer',
       name: '降魔',
-      description: `出牌阶段开始时，可弃置一种花色的所有手牌，直到下回合开始所有角色不能使用该花色的牌。${sealedList.length > 0 ? `已封印：${sealedList.join(',')}` : ''}`,
+      description: `出牌阶段开始时，可弃置一种花色的所有手牌，直到下回合开始所有角色不能主动使用该花色的牌。${sealedList.length > 0 ? `已封印：${sealedList.join(',')}` : ''}`,
       type: 'active',
       usable: (p, c) => {
         const d = this.getData(p.id);
@@ -2490,10 +2801,11 @@ export class SkillManager {
     return target.heroId === 'xiao';
   }
 
-  /** 魈-降魔：封印花色 */
+  /** 魈-降魔：封印花色（每花色每局限1次） */
   private async xiaoDemonTamer(player: PlayerState, ctx: GameContextSnapshot): Promise<void> {
     const data = this.getData(player.id);
     if (!data.sealedSuits) data.sealedSuits = {};
+    if (!data.gameSealedSuits) data.gameSealedSuits = {}; // 全局记录，每局限一次
 
     // 统计手牌中各花色数量
     const suitCounts: Record<string, number> = {};
@@ -2501,8 +2813,9 @@ export class SkillManager {
       suitCounts[c.suit] = (suitCounts[c.suit] || 0) + 1;
     }
 
-    // 过滤出可封印的花色（未被封印且有手牌）
-    const availableSuits = Object.entries(suitCounts).filter(([suit]) => !data.sealedSuits[suit]);
+    // 过滤出可封印的花色（本局未封印过，且本回合未封印，且有手牌）
+    const availableSuits = Object.entries(suitCounts).filter(([suit]) =>
+      !data.gameSealedSuits[suit] && !data.sealedSuits[suit]);
     if (availableSuits.length === 0) return;
 
     // 让玩家选择封印哪个花色（通过选择该花色的一张牌）
@@ -2522,10 +2835,12 @@ export class SkillManager {
     }
 
     data.sealedSuits[chosenSuit] = true;
+    data.gameSealedSuits[chosenSuit] = true; // 每局限一次
     const suitNames: Record<string, string> = { Heart: '♥', Diamond: '♦', Spade: '♠', Club: '♣' };
-    this.eventBus.emit(GameEvent.Log, {
-      message: `【降魔】${player.name} 弃置了所有${suitNames[chosenSuit] || chosenSuit}花色手牌（${toDiscard.length}张），封印该花色直到下回合开始！`
-    });
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【降魔】${player.name} 弃置了所有${suitNames[chosenSuit] || chosenSuit}花色手牌（${toDiscard.length}张），封印该花色直到下回合开始！`
+      });
+      VoiceManager.getInstance().playSkillVoice('xiao', '降魔', player.id);
   }
 
   /** 魈-降魔：检查花色是否被封印 */
@@ -2580,10 +2895,11 @@ export class SkillManager {
     if (!data.spiedTargets) data.spiedTargets = [];
     data.spiedTargets.push(target.id);
 
-    this.eventBus.emit(GameEvent.Log, {
-      message: `【幽客】${player.name} 查看了 ${target.name} 的身份：${getRoleChineseName(target.role)}`
-    });
-    return true;
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【幽客】${player.name} 查看了 ${target.name} 的身份：${getRoleChineseName(target.role)}`
+      });
+      VoiceManager.getInstance().playSkillVoice('yelan', '幽客', player.id);
+      return true;
   }
 
   /** 夜兰-幽客：检查被查看者死亡获得额外回合 */
@@ -2674,9 +2990,21 @@ export class SkillManager {
     const blackCards = judgeCards.filter(c => c.suit === SuitType.Spade || c.suit === SuitType.Club);
     const redCards = judgeCards.filter(c => c.suit === SuitType.Heart || c.suit === SuitType.Diamond);
 
+    // 为每张判定牌发出事件 + 那维莱特龙权
+    judgeCards.forEach((c, i) => {
+      const isRedCard = c.suit === SuitType.Heart || c.suit === SuitType.Diamond;
+      this.eventBus.emit(GameEvent.JudgeResult, {
+        playerId: player.id, kitName: '花舞',
+        cardName: c.name, suit: c.suit, number: c.number,
+        triggered: isRedCard, judgeIndex: i, totalJudge: 3,
+      });
+      this.onAfterJudge(player, c, '花舞', isRedCard);
+    });
+
     this.eventBus.emit(GameEvent.Log, {
       message: `【花舞】${player.name} 判定3张牌：${judgeCards.map(c => getCardDetail(c)).join(', ')}`
     });
+    VoiceManager.getInstance().playSkillVoice('nilou', '花舞', player.id);
 
     // 获得黑色牌
     if (blackCards.length > 0) {
@@ -2709,6 +3037,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【莲步】，切换为"${data.nilouStance}"状态。`
     });
+    VoiceManager.getInstance().playSkillVoice('nilou', '莲步', player.id);
     return true;
   }
 
@@ -2724,6 +3053,15 @@ export class SkillManager {
       return '杀';
     }
     return null;
+  }
+
+  /** 克洛琳德-决斗：高点数手牌当决斗 */
+  getClorindeDuelConvert(player: PlayerState, card: Card): boolean {
+    if (player.heroId !== 'clorinde') return false;
+    const data = this.getData(player.id);
+    if (!data.clorindeDuelUsed || data.clorindeDuelValue === undefined) return false;
+    // 点数 ≥ 阈值的手牌可当决斗打出
+    return card.number >= data.clorindeDuelValue;
   }
 
   // ======================== 迪希雅技能 ========================
@@ -2787,6 +3125,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `【佣兵】${player.name} 拼点获胜！获得 ${target.name} 的所有手牌，直到下回合开始为其承担伤害。`
       });
+      VoiceManager.getInstance().playSkillVoice('dehya', '佣兵', player.id);
     } else {
       this.eventBus.emit(GameEvent.Log, {
         message: `【佣兵】${player.name} 拼点失败。`
@@ -2842,8 +3181,10 @@ export class SkillManager {
   }
 
   /** 迪希雅-鬃狮：被杀后反击 */
-  private async dehyaLionBristle(player: PlayerState, source: PlayerState | null): Promise<void> {
+  private async dehyaLionBristle(player: PlayerState, source: PlayerState | null, sourceCard: Card | null): Promise<void> {
+    // 只有被【杀】造成伤害时才触发，万箭齐发等非杀伤害不触发
     if (!source || source.isDead || player.heroId !== 'dehya') return;
+    if (!sourceCard || !isSlash(sourceCard)) return;
     // 检查手牌中是否有杀
     const slash = player.handCards.find(c => isSlash(c));
     if (!slash) return;
@@ -2855,6 +3196,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【鬃狮】${player.name} 对 ${source.name} 使用 ${getCardDetail(slash)}！`
     });
+    VoiceManager.getInstance().playSkillVoice('dehya', '鬃狮', player.id);
 
     // 造成伤害
     await this.damageSystem.applyHpChange(source, -1, slash, player);
@@ -2897,6 +3239,7 @@ export class SkillManager {
         this.eventBus.emit(GameEvent.Log, {
           message: `【蛇蝎】${player.name} 将 ${getCardDetail(card)} 当【借刀杀人】使用！`
         });
+        VoiceManager.getInstance().playSkillVoice('nefur', '蛇蝎', player.id);
         return result;
       }
       return result;
@@ -3056,6 +3399,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【赤鬼】${player.name} 失去1点体力，获得【乐不思蜀】效果！`
     });
+    VoiceManager.getInstance().playSkillVoice('itto', '赤鬼', player.id);
 
     // 顶替现有的乐不思蜀
     player.judgeZone = player.judgeZone.filter(c => c.name !== '乐不思蜀');
@@ -3141,10 +3485,22 @@ export class SkillManager {
         return c;
       });
     } else {
-      // 简化：AI随机给1张
-      if (player.handCards.length === 0) return false;
-      const [c] = player.handCards.splice(0, 1);
-      giveCards = [c];
+      // AI：给2张牌给队友（优先给低价值牌）
+      const giveCount = Math.min(2, player.handCards.length);
+      if (giveCount === 0) return false;
+      // 排序：低价值牌优先（杀、闪、酒靠前）
+      const sortedIdx = [...player.handCards.keys()].sort((a, b) => {
+        const score = (c: Card) => c.name === '杀' ? 0 : c.name === '闪' ? 1 : c.name === '酒' ? 2 : 3;
+        return score(player.handCards[a]) - score(player.handCards[b]);
+      });
+      for (let i = 0; i < giveCount; i++) {
+        const idx = sortedIdx[i];
+        giveCards.push(player.handCards.splice(idx, 1)[0]);
+        // 调整后续索引
+        for (let j = i + 1; j < giveCount; j++) {
+          if (sortedIdx[j] > idx) sortedIdx[j]--;
+        }
+      }
     }
 
     // 送牌
@@ -3154,12 +3510,14 @@ export class SkillManager {
       message: `【军师】${player.name} 将${giveCards.length}张牌交给 ${target.name}。`
     });
 
-    // 是否触发桃园结义
-    const usePeach = await (driver as any).promptYesNo?.('是否发动【军师】，视为使用【桃园结义】？');
+    // 是否触发桃园结义（AI总是触发）
+    const isAI = !(driver as any).promptSelectMultipleCards;
+    const usePeach = isAI ? true : await (driver as any).promptYesNo?.('是否发动【军师】，视为使用【桃园结义】？');
     if (usePeach) {
       this.eventBus.emit(GameEvent.Log, {
         message: `【军师】${player.name} 视为使用【桃园结义】！`
       });
+      VoiceManager.getInstance().playSkillVoice('kokomi', '军师', player.id);
       // 执行桃园结义效果
       await this.kokomiPeachGardenEffect(player);
     }
@@ -3203,6 +3561,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【神巫】桃园结义回复体力总和为${totalHealed}，${source.name} 摸${totalHealed}张牌！`
     });
+    VoiceManager.getInstance().playSkillVoice('kokomi', '神巫', source.id);
     this.deck.drawCards(source, totalHealed);
   }
 
@@ -3217,7 +3576,8 @@ export class SkillManager {
       type: 'active',
       usable: (p, c) => {
         const d = this.getData(p.id);
-        return !d.firebackUsedThisTurn && p.id === (c.currentPlayerId) && p.handCards.some(card => card.type === CardType.Equipment);
+        return !d.firebackUsedThisTurn && p.id === (c.currentPlayerId)
+          && Object.values(p.equipZone).some(v => v !== null);
       },
     });
     skills.push({
@@ -3269,6 +3629,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【回火】${player.name} 卸下装备区的 ${getCardDetail(equipCard)} 当【火攻】使用！`
     });
+    VoiceManager.getInstance().playSkillVoice('kinich', '回火', player.id);
 
     // 2. 创建虚拟火攻卡牌（含火元素，用于玛薇卡战争加成）
     const fireCard: Card = {
@@ -3372,12 +3733,45 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `【阿乔】${target.name} 进入连环状态！`
       });
+      VoiceManager.getInstance().playSkillVoice('kinich', '阿乔', source.id);
       this.eventBus.emit(GameEvent.ChainedStateChanged, {
         playerId: target.id, isChained: true,
       });
     }
 
     data.ajawUsedThisTurn = true;
+  }
+
+  /** 金鹏-杀拦截：来源须额外出一张花色不同的杀，否则杀无效 */
+  async onXiaoGoldenwingSlash(target: PlayerState, source: PlayerState, slashCard: Card): Promise<SkillHookResult> {
+    if (target.heroId !== 'xiao') return { intercepted: false };
+
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【金鹏】${source.name} 需要再对 ${target.name} 使用一张花色不同的【杀】（当前杀花色：${slashCard.suit}）！`
+      });
+      VoiceManager.getInstance().playSkillVoice('xiao', '金鹏', source.id);
+
+    const sourceDriver = this.drivers.get(source.id)!;
+    const extraSlash = await this.damageSystem.askForResponse(source, '杀', slashCard, source, sourceDriver);
+
+    if (!extraSlash || extraSlash.suit === slashCard.suit) {
+      if (extraSlash) {
+        // 打了同花色的杀，无效
+        this.eventBus.emit(GameEvent.Log, {
+          message: `【金鹏】${source.name} 打出的杀花色相同，此【杀】对 ${target.name} 无效！`
+        });
+      } else {
+        this.eventBus.emit(GameEvent.Log, {
+          message: `【金鹏】${source.name} 无法使用额外【杀】（花色不同），此【杀】对 ${target.name} 无效！`
+        });
+      }
+      return { intercepted: true };
+    }
+
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【金鹏】${source.name} 打出了花色不同的【杀】，正常结算！`
+    });
+    return { intercepted: false };
   }
 
   /** 基尼奇-价格：被动技，检查是否需要额外杀 */
@@ -3392,6 +3786,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【价格】${source.name} 需要对 ${target.name} 再使用一张【杀】！`
     });
+    VoiceManager.getInstance().playSkillVoice('kinich', '价格', target.id);
 
     // 提示来源再打出一张杀
     const sourceDriver = this.drivers.get(source.id)!;
@@ -3449,6 +3844,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【流泉】${player.name} 将一张手牌扣置为"泉"。`
     });
+    VoiceManager.getInstance().playSkillVoice('mualani', '流泉', player.id);
     return true;
   }
 
@@ -3507,6 +3903,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【团结】${player.name} 发动团结，少摸1张牌！`
     });
+    VoiceManager.getInstance().playSkillVoice('mualani', '团结', player.id);
 
     // 选择至多2名角色进入连环
     const chainTargetIds: number[] = [];
@@ -3613,6 +4010,13 @@ export class SkillManager {
     // 存储上限2张
     if (data.kayeaMarkers.length >= 2) return false;
     const maxMarkers = Math.min(2 - data.kayeaMarkers.length, player.handCards.length);
+    if (maxMarkers <= 0) return false;
+
+    // 确认弹窗
+    const confirm = await (driver as any).promptYesNo?.(
+      `是否发动【午后】将至多2张手牌扣置为酒标记？（当前标记：${data.kayeaMarkers.length}枚）`
+    ) ?? false;
+    if (!confirm) return false;
 
     for (let i = 0; i < maxMarkers; i++) {
       const cardIdx = await driver.promptSelectCard?.(player,
@@ -3628,6 +4032,7 @@ export class SkillManager {
 
     if (data.kayeaMarkers.length > 0) {
       data.afternoonUsedThisTurn = true;
+      VoiceManager.getInstance().playSkillVoice('kaeya', '午后', player.id);
       return true;
     }
     return false;
@@ -3647,6 +4052,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【午后】${player.name} 消耗一个标记（${card.name}）当【酒】使用！剩余${data.kayeaMarkers.length}张。`
     });
+    VoiceManager.getInstance().playSkillVoice('kaeya', '午后', player.id);
     return true;
   }
 
@@ -3736,6 +4142,9 @@ export class SkillManager {
         message: `【晨曦】${player.name} 将 ${getCardDetail(card)} 扣置为标记。（共${data.dilucMarkers.length}张）`
       });
     }
+    if (data.dilucMarkers.length > 0) {
+      VoiceManager.getInstance().playSkillVoice('diluc', '晨曦', player.id);
+    }
   }
 
   /** 迪卢克-夜枭：弃置除杀以外所有手牌，无限杀+火杀 */
@@ -3768,6 +4177,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【夜枭】${player.name} 弃置了${toDiscard.length}张手牌！本回合【杀】无次数限制且均视为【火杀】！`
     });
+    VoiceManager.getInstance().playSkillVoice('diluc', '夜枭', player.id);
     return true;
   }
 
@@ -3785,6 +4195,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【晨曦】${player.name} 消耗一个标记（${card.name}）当【酒】使用！剩余${data.dilucMarkers.length}张。`
     });
+    VoiceManager.getInstance().playSkillVoice('diluc', '晨曦', player.id);
     return true;
   }
 
@@ -3929,6 +4340,7 @@ export class SkillManager {
       });
     }
 
+    VoiceManager.getInstance().playSkillVoice('jean', '代理', player.id);
     return true;
   }
 
@@ -3943,6 +4355,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【蒲骑】${player.name} 跳过群体锦囊，摸一张牌。`
     });
+    VoiceManager.getInstance().playSkillVoice('jean', '蒲骑', player.id);
   }
 
   // ======================== 可莉技能 ========================
@@ -4000,6 +4413,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.CardMovedToJudge, {
       playerId: player.id, cardName: card.name, cardSuit: card.suit, cardNumber: card.number, isBomb: true,
     });
+    VoiceManager.getInstance().playSkillVoice('klee', '炸鱼', player.id);
     return true;
   }
 
@@ -4024,6 +4438,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `💣【炸弹】爆炸！判定牌 ${judgeName} 与炸弹 ${bombName} 匹配，${player.name} 受到2点火属性伤害！`
       });
+      VoiceManager.getInstance().playSkillVoice('klee', '炸鱼', player.id);
 
       // 在弃置炸弹前检查禁闭
       const klee = this.allPlayers.find(p => p.id === bombPlacerId);
@@ -4073,6 +4488,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【禁闭】${klee.name} 将武将牌翻面！下回合跳过。`
     });
+    VoiceManager.getInstance().playSkillVoice('klee', '禁闭', klee.id);
   }
 
   /** 传递炸弹到下一位存活玩家（该玩家不能已拥有炸弹） */
@@ -4141,7 +4557,8 @@ export class SkillManager {
         data.drawBonus = 0;
         break;
       case 'wriothesley':
-        data.dukeActive = false;
+        // dukeActive 只在使用公爵时清除（line 2131），不在turn start重置
+        // 这样狱长获得牌后，公爵在下回合仍然亮着
         break;
       case 'hutao':
         data.butterflyUsedThisTurn = false;
@@ -4241,10 +4658,61 @@ export class SkillManager {
         // 黑曜每回合重置（双杀要求）
         data.obsidianUsedThisTurn = false;
         break;
+      case 'kazuha':
+        // 落叶每回合限一次
+        data.fallenLeavesUsedThisTurn = false;
+        break;
+      case 'xiao':
+        // 降魔封印持续到下回合开始，清除所有封印
+        delete data.sealedSuits;
+        break;
+      case 'albedo':
+        // 炼金每回合各限一次
+        data.alchemyWeaponUsed = false;
+        data.alchemyArmorUsed = false;
+        break;
+      case 'chasca':
+        // 调停每回合限一次
+        data.chascaMediateUsed = false;
+        break;
+      case 'lyney':
+        data.lyneyMagicUsed = false;
+        break;
+      case 'navia':
+        data.naviaPersuadeUsed = false;
+        this.resetNaviaPersuadeMarks(player);
+        break;
+      case 'clorinde':
+        data.clorindeDuelUsed = false;
+        // 剧团：下回合开始时清除
+        if (this._clorindeTroupeActive) {
+          this._clorindeTroupeActive = false;
+          this.eventBus.emit(GameEvent.Log, { message: `【剧团】技能禁用效果解除。` });
+        }
+        break;
+      case 'sigewinne':
+        data.sigewinneNurseUsed = false;
+        break;
     }
     // 清除所有角色的冰翎标记（申鹤-劈观持续到下回合开始）
     for (const [pid, d] of this.playerSkillData) {
       if (d.iceFeatherCount) delete d.iceFeatherCount;
+    }
+    // 那维莱特-龙权：每个回合限一次（包括不同角色的回合）
+    const neuv = this.allPlayers.find(p => !p.isDead && p.heroId === 'neuvillette');
+    if (neuv) {
+      const nd = this.getData(neuv.id);
+      nd.dragonUsedThisTurn = false;
+    }
+    // 清除所有角色的封印花色（魈-降魔持续到下回合开始）
+    for (const [pid, d] of this.playerSkillData) {
+      if (d.sealedSuits) delete d.sealedSuits;
+    }
+    // 清除恰斯卡-调停标记（目标回合结束时清除）
+    for (const [pid, d] of this.playerSkillData) {
+      if (d.chascaMediateTarget !== undefined && d.chascaMediateTarget === playerId) {
+        d.chascaMediateTarget = undefined;
+      }
     }
   }
 
@@ -4306,6 +4774,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【七星】${player.name} 与 ${target.name} 各恢复2点体力，各获得2枚玉璋标记！`
     });
+    VoiceManager.getInstance().playSkillVoice('keqing', '七星', player.id);
     return true;
   }
 
@@ -4337,6 +4806,7 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `【白鹭】${player.name} 手牌数(${player.handCards.length - drawCount})小于体力值(${player.hp})，摸${drawCount}张牌至${player.hp}张。`
       });
+      VoiceManager.getInstance().playSkillVoice('ayaka', '白鹭', player.id);
     }
   }
 
@@ -4374,12 +4844,12 @@ export class SkillManager {
     return true;
   }
 
-  /** 甘雨-月海（回合结束时触发）：翻面回收本回合打出的牌 */
+  /** 甘雨-月海（回合结束时触发）：翻面回收本回合打出的牌（不含装备） */
   async ganyuMoonseaTurnEnd(player: PlayerState, ctx: GameContextSnapshot): Promise<void> {
     if (player.heroId !== 'ganyu') return;
     const data = this.getData(player.id);
     if (data.moonseaUsedThisTurn) return;
-    const trackedCards: Card[] = data._cardsPlayedThisTurn || [];
+    const trackedCards: Card[] = (data._cardsPlayedThisTurn || []).filter((c: Card) => c.type !== 'Equipment');
     if (trackedCards.length === 0) return;
     const driver = this.drivers.get(player.id)!;
     const use = await (driver as any).promptYesNo?.(
@@ -4395,9 +4865,10 @@ export class SkillManager {
       player.handCards.push(card);
     }
     const actualCount = retrieved.length;
-    this.eventBus.emit(GameEvent.Log, {
-      message: `【月海】${player.name} 将武将牌翻面，从弃牌堆收回了${actualCount}张本回合打出的牌！`
-    });
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【月海】${player.name} 将武将牌翻面，从弃牌堆收回了${actualCount}张本回合打出的牌！`
+      });
+      VoiceManager.getInstance().playSkillVoice('ganyu', '月海', player.id);
   }
 
   // ======================== 申鹤技能 ========================
@@ -4420,17 +4891,26 @@ export class SkillManager {
     });
   }
 
-  /** 给目标添加冰翎标记 */
-  applyShenheIceFeather(source: PlayerState, target: PlayerState): void {
+  /** 给目标添加冰翎标记（异步，带确认弹窗） */
+  async applyShenheIceFeather(source: PlayerState, target: PlayerState): Promise<void> {
     if (source.heroId !== 'shenhe') return;
     const data = this.getData(source.id);
     if (data.icefeatherUsedThisTurn) return;
+    // 确认弹窗
+    const driver = this.drivers.get(source.id);
+    if (driver) {
+      const confirm = await (driver as any).promptYesNo?.(
+        `【劈观】是否对 ${target.name} 施加"冰翎"标记？（需使用2张【闪】才能抵消此杀）`
+      ) ?? false;
+      if (!confirm) return;
+    }
     data.icefeatherUsedThisTurn = true;
     const tData = this.getData(target.id);
     tData.iceFeatherCount = (tData.iceFeatherCount || 0) + 1;
-    this.eventBus.emit(GameEvent.Log, {
-      message: `【劈观】${source.name} 给 ${target.name} 添加了"冰翎"标记（需使用2张闪）！`
-    });
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【劈观】${source.name} 给 ${target.name} 添加了"冰翎"标记（需使用2张闪）！`
+      });
+      VoiceManager.getInstance().playSkillVoice('shenhe', '劈观', source.id);
   }
 
   /** 检查目标是否有冰翎标记 */
@@ -4471,8 +4951,9 @@ export class SkillManager {
     if (nefur && player.id !== nefur.id) {
       this.deck.drawCards(nefur, 1);
       this.eventBus.emit(GameEvent.Log, {
-        message: `【北网】${nefur.name} 因 ${player.name} 流失体力摸了一张牌。`
-      });
+      message: `【北网】${nefur.name} 因 ${player.name} 流失体力摸了一张牌。`
+    });
+    VoiceManager.getInstance().playSkillVoice('nefur', '北网', nefur.id);
     }
   }
 
@@ -4515,12 +4996,14 @@ export class SkillManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `【灵使】${lauma.name}(${lauma.hp}HP) 替 ${partner.name}(${partner.hp}HP) 承受伤害！`
       });
+      VoiceManager.getInstance().playSkillVoice('lauma', '灵使', lauma.id);
       return { redirected: true, newTarget: lauma };
     } else if (target.id === lauma.id && lauma.hp <= partner.hp) {
       // 搭档替菈乌玛承伤
       this.eventBus.emit(GameEvent.Log, {
         message: `【灵使】${partner.name}(${partner.hp}HP) 替 ${lauma.name}(${lauma.hp}HP) 承受伤害！`
       });
+      VoiceManager.getInstance().playSkillVoice('lauma', '灵使', lauma.id);
       return { redirected: true, newTarget: partner };
     }
 
@@ -4613,6 +5096,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【秘闻】${player.name} 查看了 ${target.name} 的一张手牌并进行了标记：${getCardDetail(markedCard)}`
     });
+    VoiceManager.getInstance().playSkillVoice('nefur', '秘闻', player.id);
     return true;
   }
 
@@ -4750,6 +5234,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【咏月】${player.name} 弃置了2张牌，${target.name} 摸2张牌，${player.name} 回复1点体力(HP:${player.hp}/${player.maxHp})`
     });
+    VoiceManager.getInstance().playSkillVoice('lauma', '咏月', player.id);
     return true;
   }
 
@@ -4776,6 +5261,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【灵使】${player.name} 与 ${target.name} 建立"霜月"标记！${relation}。持续到${player.name}的下回合开始。`
     });
+    VoiceManager.getInstance().playSkillVoice('lauma', '灵使', player.id);
     return true;
   }
 
@@ -4788,14 +5274,22 @@ export class SkillManager {
       name: '庇笛',
       description: `可以将一张手牌当【闪电】打出。${data.lightningUsedThisTurn ? '（本回合已发动）' : ''}`,
       type: 'active',
-      usable: (p, c) => !data.lightningUsedThisTurn && p.id === (c.currentPlayerId) && p.handCards.length > 0,
+      usable: (p, c) => {
+        const d = this.getData(p.id);
+        // 自己的判定区已有闪电则不能再打
+        const hasLightning = p.judgeZone.some((j: Card) => j.name === '闪电');
+        return !d.lightningUsedThisTurn && p.id === (c.currentPlayerId) && p.handCards.length > 0 && !hasLightning;
+      },
     });
     skills.push({
       id: 'olorun_soul',
       name: '残魂',
       description: '回合开始时，可失去1点体力，选择场上已死亡角色获得其一项技能至下回合开始。',
       type: 'active',
-      usable: (p) => p.handCards.length > 0 || true, // 总是可用
+      usable: (p) => {
+        const deadCount = getAlivePlayers(this.allPlayers).length < this.allPlayers.length;
+        return deadCount; // 有死亡角色时才可用
+      },
     });
   }
 
@@ -4817,8 +5311,8 @@ export class SkillManager {
     if (targetId === null) return false;
     const deadTarget = deadPlayers.find(p => p.id === targetId)!;
 
-    // 获取死亡角色的技能列表
-    const deadSkills = this.getSkills(deadTarget, ctx).filter(s => s.type !== 'passive'); // 被动技不能偷
+    // 获取死亡角色的技能列表（被动技能也可以偷）
+    const deadSkills = this.getSkills(deadTarget, ctx);
     if (deadSkills.length === 0) {
       this.eventBus.emit(GameEvent.Log, { message: `【残魂】${deadTarget.name} 没有可获得的技能。` });
       return false;
@@ -4838,6 +5332,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【残魂】${player.name} 失去了1点体力，获得了 ${deadTarget.name} 的技能【${chosenSkill.name}】！持续到${player.name}的下回合开始。`
     });
+    VoiceManager.getInstance().playSkillVoice('olorun', '残魂', player.id);
 
     // 将偷来的技能注册到当前玩家的技能列表中
     // 注意：这需要在getSkills中处理
@@ -4870,6 +5365,11 @@ export class SkillManager {
       return false;
     }
     if (player.handCards.length === 0) return false;
+    // 自己判定区已有闪电则不能使用
+    if (player.judgeZone.some(j => j.name === '闪电')) {
+      this.eventBus.emit(GameEvent.Log, { message: '【庇笛】自己判定区已有闪电，无法再打出。' });
+      return false;
+    }
 
     const driver = this.drivers.get(player.id)!;
     const cardIdx = await driver.promptSelectCard?.(player, '【庇笛】选择一张手牌当【闪电】打出', () => true, ctx) ?? -1;
@@ -4894,6 +5394,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【庇笛】${player.name} 将 ${getCardDetail(card)} 当【闪电】打入自己的判定区！`
     });
+    VoiceManager.getInstance().playSkillVoice('olorun', '庇笛', player.id);
     return true;
   }
 
@@ -4942,6 +5443,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【萨满】${player.name} 预言了 ${suitNames[idx]} 花色。`
     });
+    VoiceManager.getInstance().playSkillVoice('citlali', '萨满', player.id);
     return { suit: predictedSuit, predicted: true };
   }
 
@@ -4995,6 +5497,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【记忆】${citlali.name} 用上次判定牌 ${getCardDetail(lastCard)} 替换了本次判定牌！`
     });
+    VoiceManager.getInstance().playSkillVoice('citlali', '记忆', citlali.id);
     return { modified: true, card: lastCard };
   }
 
@@ -5030,5 +5533,878 @@ export class SkillManager {
   isShamanUsedThisRound(citlaliId: number): boolean {
     const data = this.getData(citlaliId);
     return !!data.shamanUsedThisRound;
+  }
+
+  // ======================== v3.0 新武将技能实现 ========================
+
+  // ========== 法尔伽 - 远征·北风·写信 ==========
+
+  private addVarkaSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({
+      id: 'varka_write', name: '写信',
+      description: `将一张手牌扣置于一名其他角色的武将牌上，本回合对其出杀时无视距离。该角色的下回合开始时，其获得此牌。${data.varkaLetterTarget ? `（目标：${this.allPlayers.find(p=>p.id===data.varkaLetterTarget)?.name||'?'}）` : ''}`,
+      type: 'active', usable: (p, c) => p.id === (c.currentPlayerId) && p.handCards.length > 0,
+    });
+    skills.push({ id: 'varka_expedition', name: '远征', description: '当你使用【杀】指定距离大于1的角色为目标时，你摸一张牌。', type: 'trigger', usable: () => false });
+    skills.push({ id: 'varka_northwind', name: '北风', description: '当你使用【杀】时，你可以弃置一张手牌，令此【杀】不计入本回合出杀次数限制。', type: 'trigger', usable: () => false });
+  }
+
+  /** 法尔伽-写信：扣置一张手牌到目标武将牌上 */
+  private async varkaWrite(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+
+    // 选一张牌（AI选评分最差的）
+    const cardIdx = await driverAny.promptSelectCard?.(player, '写信-选择一张手牌扣置', () => true, ctx) ?? -1;
+    if (cardIdx < 0) return false;
+    const card = player.handCards.splice(cardIdx, 1)[0];
+    data.varkaLetterCard = card; // 存储但不计入手牌
+
+    // 选目标
+    const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+    const targetId = await driver.promptTarget(player, aliveOthers.map(p => p.id), '写信-选择目标角色', ctx);
+    if (targetId === null) { player.handCards.splice(cardIdx, 0, card); return false; }
+    data.varkaLetterTarget = targetId;
+
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【写信】${player.name} 将一张牌扣置于 ${aliveOthers.find(p => p.id === targetId)!.name} 的武将牌上，本回合对其出杀无视距离！`
+    });
+    VoiceManager.getInstance().playSkillVoice('varka', '写信', player.id);
+    return true;
+  }
+
+  /** 法尔伽-远征：杀指定距离>1的目标时摸1牌（在CardEffectManager的processSingleSlash中调用） */
+  varkaExpeditionCheck(source: PlayerState, target: PlayerState): void {
+    if (source.heroId !== 'varka') return;
+    const dist = getDistance(source, target, this.allPlayers);
+    if (dist > 1) {
+      this.deck.drawCards(source, 1);
+      this.eventBus.emit(GameEvent.Log, { message: `【远征】${source.name} 对距离>1的 ${target.name} 使用了【杀】，摸1张牌。` });
+      VoiceManager.getInstance().playSkillVoice('varka', '远征', source.id);
+    }
+  }
+
+  /** 法尔伽-北风：弃置一张牌令杀不计次数（在CardEffectManager的handleActivePlay中调用） */
+  async varkaNorthwindPrompt(source: PlayerState): Promise<boolean> {
+    if (source.heroId !== 'varka' || source.handCards.length === 0) return false;
+    const driver = this.drivers.get(source.id);
+    if (!driver) return false;
+    const useIt = await (driver as any).promptYesNo?.('【北风】是否弃置一张手牌，令此【杀】不计入本回合出杀次数？') ?? false;
+    if (!useIt) return false;
+    // AI选评分最差的牌弃置
+    const cardIdx = await (driver as any).promptSelectCard?.(source, '北风-选择一张手牌弃置', () => true,
+      this.buildContext(source.id)) ?? 0;
+    const discard = source.handCards.splice(cardIdx, 1)[0];
+    this.deck.sendToDiscard(discard);
+    this.eventBus.emit(GameEvent.Log, { message: `【北风】${source.name} 弃置 ${getCardDetail(discard)}，此【杀】不计次数！` });
+    VoiceManager.getInstance().playSkillVoice('varka', '北风', source.id);
+    return true;
+  }
+
+  /** 法尔伽：获取写信标记目标，本回合对其无视距离 */
+  getVarkaLetterTarget(sourceId: number): number | null {
+    const data = this.getData(sourceId);
+    return data.varkaLetterTarget ?? null;
+  }
+
+  // ========== 阿贝多 - 炼金 ==========
+
+  private addAlbedoSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({
+      id: 'albedo_alchemy_weapon', name: '炼金-武器',
+      description: '将两张【杀】转换为虚拟武器，装备给一名角色。' + (data.alchemyWeaponUsed ? '（本回合已使用）' : ''),
+      type: 'active',
+      usable: (p, c) => !this.getData(p.id).alchemyWeaponUsed && p.id === (c.currentPlayerId) && p.handCards.filter(card => isSlash(card)).length >= 2,
+    });
+    skills.push({
+      id: 'albedo_alchemy_armor', name: '炼金-防具',
+      description: '将两张【闪】转换为虚拟防具，装备给一名角色。' + (data.alchemyArmorUsed ? '（本回合已使用）' : ''),
+      type: 'active',
+      usable: (p, c) => !this.getData(p.id).alchemyArmorUsed && p.id === (c.currentPlayerId) && p.handCards.filter(card => card.name === '闪').length >= 2,
+    });
+  }
+
+  /** 阿贝多-炼金：通用转换逻辑 */
+  private async albedoDoAlchemy(player: PlayerState, ctx: GameContextSnapshot, cardFilter: (c: Card) => boolean, equipType: EquipmentType, flagKey: string, skillTitle: string): Promise<boolean> {
+    const data = this.getData(player.id);
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+
+    const matching = player.handCards.filter(c => cardFilter(c));
+    if (matching.length < 2) return false;
+    const idx1 = await driverAny.promptSelectCard?.(player, `${skillTitle}-选择第一张`, cardFilter, ctx) ?? -1;
+    if (idx1 < 0) return false;
+    const card1 = player.handCards.splice(idx1, 1)[0];
+    const idx2 = await driverAny.promptSelectCard?.(player, `${skillTitle}-选择第二张`, cardFilter, ctx) ?? -1;
+    if (idx2 < 0) { player.handCards.splice(idx1, 0, card1); return false; }
+    const card2 = player.handCards.splice(idx2, 1)[0];
+
+    // 选目标
+    const alivePlayers = getAlivePlayers(this.allPlayers);
+    const targetId = await driver.promptTarget(player, alivePlayers.map(p => p.id), `${skillTitle}-选择装备目标`, ctx);
+    if (targetId === null) { player.handCards.push(card1, card2); return false; }
+    const target = alivePlayers.find(p => p.id === targetId)!;
+
+    // 创建虚拟装备：武器范围2，防具减伤1（白银狮子效果）
+    const displayName = equipType === EquipmentType.Weapon ? '炼金武器' : '炼金防具';
+    const virtualEquip: any = {
+      id: -10000 - player.id - Date.now() % 10000,
+      name: displayName,
+      suit: card1.suit, number: card1.number,
+      type: 'Equipment', equipType, isVirtual: true, cardSource: player,
+      _originalCard: card1, _albedoAlchemy: true,
+      ...(equipType === EquipmentType.Weapon ? { weaponRange: 2 } : {}),
+    };
+
+    // 卡2进弃牌堆
+    card2.isVirtual = true; card2.cardSource = player;
+    this.deck.sendToDiscard(card2);
+
+    // 卸载目标原有同类型装备
+    const oldEquip = target.equipZone[equipType];
+    if (oldEquip) { target.equipZone[equipType] = null; this.deck.sendToDiscard(oldEquip); }
+
+    target.equipZone[equipType] = virtualEquip as any;
+    (data as any)[flagKey] = true;
+
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【炼金】${player.name} 将 ${getCardDetail(card1)}+${getCardDetail(card2)} 炼成虚拟${equipType === EquipmentType.Weapon ? '武器' : '防具'}，装备给 ${target.name}！`
+    });
+    VoiceManager.getInstance().playSkillVoice('albedo', '炼金', player.id);
+    return true;
+  }
+
+  private async albedoAlchemyWeapon(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    return this.albedoDoAlchemy(player, ctx, c => isSlash(c), EquipmentType.Weapon, 'alchemyWeaponUsed', '炼金-武器');
+  }
+  private async albedoAlchemyArmor(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    return this.albedoDoAlchemy(player, ctx, c => c.name === '闪', EquipmentType.Armor, 'alchemyArmorUsed', '炼金-防具');
+  }
+
+  // ========== 菲林斯 - 长茔·灯妖 ==========
+
+  private addPhilinsSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    const aliveCount = getAlivePlayers(this.allPlayers).length;
+    skills.push({ id: 'philins_grave', name: '长茔', description: '当一名角色死亡时，你额外摸2张牌。', type: 'trigger', usable: () => false });
+    skills.push({
+      id: 'philins_lantern', name: '灯妖',
+      description: `回合开始时，若当前体力值等于存活角色数(${aliveCount})，则直到本回合结束，你使人濒死时立即阵亡。${data.philinsLanternActive ? '（已激活）' : ''}`,
+      type: 'trigger', usable: () => false,
+    });
+  }
+
+  /** 菲林斯-长茔：角色死亡时额外摸2张（在onDeath中调用） */
+  philinsGraveOnDeath(player: PlayerState): void {
+    if (player.heroId !== 'philins' || player.isDead) return;
+    this.deck.drawCards(player, 2);
+    this.eventBus.emit(GameEvent.Log, { message: `【长茔】${player.name} 额外摸2张牌！` });
+    VoiceManager.getInstance().playSkillVoice('philins', '长茔', player.id);
+  }
+
+  /** 菲林斯-灯妖：回合开始时检查 */
+  philinsLanternCheck(player: PlayerState): void {
+    if (player.heroId !== 'philins') return;
+    const data = this.getData(player.id);
+    const aliveCount = getAlivePlayers(this.allPlayers).length;
+    if (player.hp === aliveCount) {
+      data.philinsLanternActive = true;
+      this.eventBus.emit(GameEvent.Log, { message: `【灯妖】${player.name} 体力值(${player.hp})=存活角色数(${aliveCount})，本回合使角色濒死时将立即阵亡！` });
+      VoiceManager.getInstance().playSkillVoice('philins', '灯妖', player.id);
+    } else {
+      data.philinsLanternActive = false;
+    }
+  }
+
+  /** 菲林斯-灯妖：检查濒死立即阵亡 */
+  isPhilinsLanternActive(player: PlayerState): boolean {
+    return !!this.getData(player.id).philinsLanternActive;
+  }
+
+  // ========== 伊涅芙 - 破镜·机娘 ==========
+
+  private addInevSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    skills.push({ id: 'inev_mirror', name: '破镜', description: '回合内连续两张手牌点数之和为11时，摸2张牌并弃1张牌。', type: 'trigger', usable: () => false });
+    skills.push({ id: 'inev_maid', name: '机娘', description: '你的牌点数对11取模（J=0,Q=1,K=2）。', type: 'passive', usable: () => false });
+  }
+
+  /** 伊涅芙-破镜：连续两张牌点数和为11（在onAfterCardPlay中调用） */
+  inevMirrorCheck(player: PlayerState, cardJustPlayed: Card): void {
+    if (player.heroId !== 'inev') return;
+    // 机娘：打出J/Q/K时触发语音
+    if (cardJustPlayed.number > 10) {
+      VoiceManager.getInstance().playSkillVoice('inev', '机娘', player.id);
+    }
+    const data = this.getData(player.id);
+    const lastNumber = data.inevLastCardNumber;
+    if (lastNumber === undefined) { data.inevLastCardNumber = this.getModNumber(cardJustPlayed.number); return; }
+    const modNum = this.getModNumber(cardJustPlayed.number);
+    const modLast = this.getModNumber(lastNumber);
+    if (modLast + modNum === 11) {
+      this.deck.drawCards(player, 2);
+      data.inevMirrorTriggered = true;
+      this.eventBus.emit(GameEvent.Log, { message: `【破镜】${player.name} 连续两张点数之和为11！摸2张牌。` });
+      VoiceManager.getInstance().playSkillVoice('inev', '破镜', player.id);
+    }
+    data.inevLastCardNumber = cardJustPlayed.number;
+  }
+
+  /** 伊涅芙-机娘：牌点数对11取模 J=11=0, Q=12=1, K=13=2 */
+  getModNumber(num: number): number {
+    if (num > 10) return num - 11;
+    return num;
+  }
+
+  // ========== 提纳里 - 巡林·生论 ==========
+
+  private addTighnariSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const aliveCount = getAlivePlayers(this.allPlayers).length;
+    skills.push({ id: 'tighnari_patrol', name: '巡林', description: `回合开始时，全局展示牌堆顶${aliveCount}张牌（存活人数），将其中的基本牌分配给任意角色，其余以原顺序放回。`, type: 'trigger', usable: () => false });
+    skills.push({ id: 'tighnari_biology', name: '生论', description: '当你使用【桃】时，可以额外指定一名其他角色，该角色也回复1点体力。', type: 'trigger', usable: () => false });
+  }
+
+  /** 提纳里-巡林：回合开始时观看牌堆顶X张牌（X=存活人数），全局展示后分配基本牌，剩余放回 */
+  /** 提纳里-巡林：回合开始时观看牌堆顶X张牌（X=存活人数），全局展示后分配基本牌，剩余放回 */
+  private async tighnariPatrol(player: PlayerState, ctx: GameContextSnapshot): Promise<void> {
+    if (player.heroId !== 'tighnari') return;
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+    const alivePlayers = getAlivePlayers(this.allPlayers);
+    const aliveCount = alivePlayers.length;
+    const useIt = await driverAny.promptYesNo?.(`【巡林】是否观看牌堆顶${aliveCount}张牌并分配其中的基本牌？`) ?? false;
+    if (!useIt) return;
+
+    const topCards: Card[] = [];
+    for (let i = 0; i < aliveCount; i++) { const c = this.deck.dealOneCard(); if (c) topCards.push(c); else break; }
+    if (topCards.length === 0) return;
+
+    // 全局展示所有牌（复用五谷丰登窗口）
+    this.eventBus.emit(GameEvent.CardsDealtToTable, {
+      cards: [...topCards],
+      sourceName: player.name,
+      allPlayerNames: alivePlayers.map(p => p.name),
+    });
+
+    const basicCards = topCards.filter(c => c.type === 'Basic');
+    const nonBasic = topCards.filter(c => c.type !== 'Basic');
+
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【巡林】${player.name} 观看了牌堆顶${topCards.length}张牌：${topCards.map(c => getCardDetail(c)).join('、')}`
+    });
+    VoiceManager.getInstance().playSkillVoice('tighnari', '巡林', player.id);
+
+    // 分配基本牌（逐张询问目标，卡牌窗口保持可见；仅限队友）
+    const myFaction = (player as any).faction as string | undefined;
+    let patrolTargets: PlayerState[];
+    if (myFaction) {
+      // PVE: 同阵营
+      patrolTargets = alivePlayers.filter(p => p.id === player.id || (p as any).faction === myFaction);
+    } else {
+      // PVP: 同一势力（君主/忠臣 vs 反贼/内奸）
+      const myRole = player.role;
+      if (myRole === RoleType.Monarch || myRole === RoleType.Minister) {
+        patrolTargets = alivePlayers.filter(p => p.id === player.id || p.role === RoleType.Monarch || p.role === RoleType.Minister);
+      } else if (myRole === RoleType.Rebel) {
+        patrolTargets = alivePlayers.filter(p => p.id === player.id || p.role === 'Rebel');
+      } else {
+        // 内奸或其他：只给自己
+        patrolTargets = [player];
+      }
+    }
+    for (const bc of basicCards) {
+      const targetId = await driver.promptTarget(player, patrolTargets.map(p => p.id), `巡林-将 ${getCardDetail(bc)} 分配给谁？（点取消留给自己）`, ctx);
+      if (targetId !== null) {
+        const target = patrolTargets.find(p => p.id === targetId)!;
+        target.handCards.push(bc);
+        this.eventBus.emit(GameEvent.Log, { message: `【巡林】${player.name} 将 ${getCardDetail(bc)} 分配给了 ${target.name}。` });
+      } else {
+        player.handCards.push(bc);
+        this.eventBus.emit(GameEvent.Log, { message: `【巡林】${player.name} 自己保留了 ${getCardDetail(bc)}。` });
+      }
+      // 标记已分配
+      this.eventBus.emit(GameEvent.GraceCardPicked, { cardId: bc.id, pickerName: player.name });
+    }
+
+    // 关闭展示窗口
+    setTimeout(() => this.eventBus.emit(GameEvent.GraceCompleted, {}), 800);
+
+    // 非基本牌按原顺序放回牌堆顶（倒序放回以保持原顺序）
+    for (let i = nonBasic.length - 1; i >= 0; i--) {
+      this.deck.returnToDrawPile([nonBasic[i]]);
+    }
+  }
+
+  /** 提纳里-生论：使用桃时可额外指定一名其他角色回复 */
+  async tighnariBiologyPrompt(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    if (player.heroId !== 'tighnari') return false;
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+    const useIt = await driverAny.promptYesNo?.('【生论】是否额外指定一名其他角色也回复1点体力？') ?? false;
+    if (!useIt) return false;
+    const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+    const targetId = await driverAny.promptTarget?.(player, aliveOthers.map(p => p.id), '生论-选择额外回复目标', ctx) ?? null;
+    if (targetId === null) return false;
+    const target = aliveOthers.find(p => p.id === targetId)!;
+    target.hp = Math.min(target.maxHp, target.hp + 1);
+    this.eventBus.emit(GameEvent.Log, { message: `【生论】${target.name} 也回复了1点体力！HP: ${target.hp}/${target.maxHp}` });
+    VoiceManager.getInstance().playSkillVoice('tighnari', '生论', player.id);
+    this.eventBus.emit(GameEvent.HpChanged, { playerId: target.id, newHp: target.hp, maxHp: target.maxHp, delta: 1, isDamage: false });
+    return true;
+  }
+
+  // ========== 赛诺 - 素论·风纪 ==========
+
+  private addCynoSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const wp = player.equipZone[EquipmentType.Weapon];
+    const range = wp ? (wp as any).weaponRange || 1 : 1;
+    skills.push({
+      id: 'cyno_supreme', name: '素论',
+      description: `使用【杀】指定目标时：武器距离≥2需双闪，≥4不可闪避。当前武器距离：${range}`,
+      type: 'trigger', usable: () => false,
+    });
+    skills.push({ id: 'cyno_discipline', name: '风纪', description: '使用【杀】造成伤害后，可以弃置目标装备区里的一张牌。', type: 'trigger', usable: () => false });
+  }
+
+  /** 赛诺-素论：获取杀需要的闪数量（0=不可闪避, 1=正常, 2=双闪） */
+  getCynoDodgeRequirement(source: PlayerState): number {
+    if (source.heroId !== 'cyno') return 1;
+    const wp = source.equipZone[EquipmentType.Weapon];
+    const range = wp ? (wp as any).weaponRange || 1 : 1;
+    if (range >= 4) return 0; // 不可闪避
+    if (range >= 2) return 2; // 需双闪
+    return 1;
+  }
+
+  /** 赛诺-风纪：杀造成伤害后弃装备 */
+  private async cynoDiscipline(player: PlayerState, sourceCard: Card | null, source: PlayerState | null): Promise<void> {
+    if (player.heroId !== 'cyno' || !source || !sourceCard || !isSlash(sourceCard)) return;
+    const target = source; // 杀的使用者是source，伤害目标是player... wait
+    // onAfterDamaged 参数是(player=受害者, damage, sourceCard, source=攻击者)
+    // 但这里cyno是攻击者！让我重新理解...
+    // 不，这里player是受害者，不是cyno！cyno是攻击者时才触发风纪。
+    // 需要在onAfterDamaged中判断source是否是cyno
+    // 这个hook放错位置了，应该在source一方
+  }
+
+  /** 赛诺-风纪：作为攻击者造成伤害后触发（在DamageSystem中调用） */
+  async cynoDisciplineOnDamage(source: PlayerState, target: PlayerState): Promise<void> {
+    if (source.heroId !== 'cyno' || target.isDead) return;
+    const prioritySlots: EquipmentType[] = [EquipmentType.Armor, EquipmentType.Weapon, EquipmentType.DefensiveHorse, EquipmentType.OffensiveHorse];
+    const hasEquip = prioritySlots.some(s => target.equipZone[s] !== null);
+    if (!hasEquip) return;
+    const driver = this.drivers.get(source.id);
+    if (!driver) return;
+    const useIt = await (driver as any).promptYesNo?.('【风纪】是否弃置目标装备区里的一张牌？') ?? false;
+    if (!useIt) return;
+    // AI弃牌顺序：防具>武器>防御马>进攻马
+    for (const slot of prioritySlots) {
+      const equip = target.equipZone[slot];
+      if (equip) {
+        target.equipZone[slot] = null;
+        this.deck.sendToDiscard(equip);
+        this.eventBus.emit(GameEvent.Log, { message: `【风纪】${source.name} 弃置了 ${target.name} 的 ${getCardDetail(equip)}！` });
+        VoiceManager.getInstance().playSkillVoice('cyno', '风纪', source.id);
+        return;
+      }
+    }
+  }
+
+  // ========== 赛诺 hook 修复：移除错误注册，改用 direct call ==========
+  // (cynoDiscipline 方法已废弃，改用 cynoDisciplineOnDamage)
+
+  // ========== 神里绫人 - 社奉·家主 ==========
+
+  private addAyatoSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({ id: 'ayato_service', name: '社奉', description: '当你参与拼点时，你获得双方用于拼点的牌。', type: 'trigger', usable: () => false });
+    skills.push({
+      id: 'ayato_head', name: '家主',
+      description: `你的回合限一次，与一名角色拼点。若双方差值<4，则下张手牌可额外选择任意个合法目标。${data.ayatoHeadUsed ? '（本回合已使用）' : ''}`,
+      type: 'active', usable: (p, c) => !this.getData(p.id).ayatoHeadUsed && p.id === (c.currentPlayerId),
+    });
+  }
+
+  /** 神里绫人-家主：拼点，差值<4则下张牌多目标 */
+  private async ayatoHead(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id && p.handCards.length > 0);
+    if (aliveOthers.length === 0) return false;
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+    const targetId = await driver.promptTarget(player, aliveOthers.map(p => p.id), '家主-选择拼点目标', ctx);
+    if (targetId === null) return false;
+    const target = aliveOthers.find(p => p.id === targetId)!;
+
+    // AI出点数最大的牌，对方也出最大的
+    let myCardIdx = 0, myMax = 0;
+    player.handCards.forEach((c, i) => { const n = this.getModNumber(c.number); if (n > myMax) { myMax = n; myCardIdx = i; } });
+    let theirCardIdx = 0, theirMax = 0;
+    target.handCards.forEach((c, i) => { const n = this.getModNumber(c.number); if (n > theirMax) { theirMax = n; theirCardIdx = i; } });
+
+    const myCard = player.handCards.splice(myCardIdx, 1)[0];
+    const theirCard = target.handCards.splice(theirCardIdx, 1)[0];
+    const myNum = this.getModNumber(myCard.number);
+    const theirNum = this.getModNumber(theirCard.number);
+
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【家主】拼点: ${player.name} ${getCardDetail(myCard)}(${myNum}) VS ${target.name} ${getCardDetail(theirCard)}(${theirNum})`
+    });
+
+    // 社奉：绫人获得双方拼点牌（如果是绫人参与）
+    player.handCards.push(myCard, theirCard);
+    this.eventBus.emit(GameEvent.Log, { message: `【社奉】${player.name} 获得了双方拼点的牌！` });
+    VoiceManager.getInstance().playSkillVoice('ayato', '社奉', player.id);
+
+    data.ayatoHeadUsed = true;
+    const diff = Math.abs(myNum - theirNum);
+    if (diff < 4) {
+      data.ayatoMultiTarget = true;
+      this.eventBus.emit(GameEvent.Log, { message: `【家主】差值${diff}<4！${player.name} 下一张手牌可额外选择任意个合法目标！` });
+      VoiceManager.getInstance().playSkillVoice('ayato', '家主', player.id);
+    }
+    return true;
+  }
+
+  /** 神里绫人-社奉：拼点后获得双方牌（被外部调用时） */
+  ayatoServiceOnCompare(player: PlayerState, myCard: Card, theirCard: Card): void {
+    if (player.heroId !== 'ayato') return;
+    player.handCards.push(myCard, theirCard);
+    this.eventBus.emit(GameEvent.Log, { message: `【社奉】${player.name} 获得了双方拼点的牌！` });
+    VoiceManager.getInstance().playSkillVoice('ayato', '社奉', player.id);
+  }
+
+  /** 神里绫人：下张手牌是否可多目标 */
+  consumeAyatoMultiTarget(player: PlayerState): boolean {
+    const data = this.getData(player.id);
+    if (data.ayatoMultiTarget) { data.ayatoMultiTarget = false; return true; }
+    return false;
+  }
+
+  // ========== 瓦雷莎 - 豪宴·牛劲 ==========
+
+  private addVaresaSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({ id: 'varesa_feast', name: '豪宴', description: '手牌上限20。回合结束时若手牌数>手牌上限，下回合摸牌阶段额外摸（手牌数-手牌上限）张牌。', type: 'passive', usable: () => false });
+    skills.push({
+      id: 'varesa_bull', name: '牛劲',
+      description: `你的回合，前3张主动牌须额外弃置一张牌。已打出${data.varesaCardsPlayed || 0}/3张。`,
+      type: 'passive', usable: () => false,
+    });
+  }
+
+  /** 瓦雷莎-豪宴：回合结束时检查，下回合额外摸牌 */
+  varesaFeastEndCheck(player: PlayerState, ctx: GameContextSnapshot): void {
+    if (player.heroId !== 'varesa') return;
+    const data = this.getData(player.id);
+    const handCount = player.handCards.length;
+    const handLimit = getHandLimit(player);
+    if (handCount > handLimit) {
+      data.varesaFeastBonus = handCount - handLimit;
+      this.eventBus.emit(GameEvent.Log, { message: `【豪宴】${player.name} 手牌数(${handCount})>手牌上限(${handLimit})，下回合额外摸${data.varesaFeastBonus}张牌！` });
+      VoiceManager.getInstance().playSkillVoice('varesa', '豪宴', player.id);
+    } else {
+      data.varesaFeastBonus = 0;
+    }
+  }
+
+  /** 瓦雷莎-牛劲：主动打出牌后需弃置一张（仅在自己回合内有效） */
+  async varesaBullForceDiscard(player: PlayerState): Promise<void> {
+    if (player.heroId !== 'varesa') return;
+    // 仅在当前回合为自己时触发（回合外被动打出不计数）
+    if (this.currentTurnPlayerId !== player.id) return;
+    const data = this.getData(player.id);
+    const count = data.varesaCardsPlayed = (data.varesaCardsPlayed || 0) + 1;
+    if (count > 3 || player.handCards.length === 0) return;
+    const driver = this.drivers.get(player.id);
+    if (!driver) return;
+    const driverAny = driver as any;
+    this.eventBus.emit(GameEvent.Log, { message: `【牛劲】${player.name} 需额外弃置一张牌（第${count}/3张）。` });
+    const idx = await driverAny.promptSelectCard?.(player, '牛劲-选择一张牌弃置', () => true, this.buildContext(player.id)) ?? 0;
+    const discard = player.handCards.splice(idx, 1)[0];
+    this.deck.sendToDiscard(discard);
+    this.eventBus.emit(GameEvent.Log, { message: `【牛劲】${player.name} 额外弃置了 ${getCardDetail(discard)}。` });
+    VoiceManager.getInstance().playSkillVoice('varesa', '牛劲', player.id);
+  }
+
+  /** 瓦雷莎：获取手牌上限 */
+  getVaresaHandLimit(): number { return 20; }
+
+  /** 瓦雷莎：获取下回合额外摸牌数 */
+  getVaresaDrawBonus(player: PlayerState): number {
+    return this.getData(player.id).varesaFeastBonus || 0;
+  }
+
+  // ========== 恰斯卡 - 超越·调停 ==========
+
+  private addChascaSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({
+      id: 'chasca_beyond', name: '超越',
+      description: `本回合未主动使用【杀】/【决斗】，则下回合出杀次数+2。${data.chascaBeyondReady ? '（下回合触发）' : ''}`,
+      type: 'trigger', usable: () => false,
+    });
+    skills.push({
+      id: 'chasca_mediate', name: '调停',
+      description: `弃置一张【杀】标记一名角色。该角色回合内使用【杀】/【决斗】时先受1点伤害，其弃置的【杀】/【决斗】归你。${data.chascaMediateUsed ? '（本回合已使用）' : ''}`,
+      type: 'active',
+      usable: (p, c) => !this.getData(p.id).chascaMediateUsed && p.id === (c.currentPlayerId) && p.handCards.some(card => isSlash(card)),
+    });
+  }
+
+  /** 恰斯卡-超越：回合开始时检查上回合 */
+  chascaBeyondCheck(player: PlayerState): void {
+    if (player.heroId !== 'chasca') return;
+    const data = this.getData(player.id);
+    if (data.chascaBeyondReady) {
+      data.chascaBeyondReady = false;
+      data.chascaBeyondActive = true;
+      this.eventBus.emit(GameEvent.Log, { message: `【超越】${player.name} 上回合未出杀/决斗，本回合出杀次数+2！` });
+      VoiceManager.getInstance().playSkillVoice('chasca', '超越', player.id);
+    }
+  }
+
+  /** 恰斯卡-超越：回合结束时检查本回合 */
+  chascaBeyondEndCheck(player: PlayerState): void {
+    if (player.heroId !== 'chasca') return;
+    const data = this.getData(player.id);
+    data.chascaBeyondActive = false;
+    if (!data.chascaUsedSlashOrDuel) {
+      data.chascaBeyondReady = true;
+    }
+    data.chascaUsedSlashOrDuel = false; // 重置追踪
+  }
+
+  /** 恰斯卡：记录使用了杀/决斗 */
+  chascaTrackSlashOrDuel(player: PlayerState): void {
+    if (player.heroId !== 'chasca') return;
+    this.getData(player.id).chascaUsedSlashOrDuel = true;
+  }
+
+  /** 恰斯卡-调停 */
+  private async chascaMediate(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    const slashIdx = player.handCards.findIndex(c => isSlash(c));
+    if (slashIdx < 0) return false;
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+
+    const cardIdx = await driverAny.promptSelectCard?.(player, '调停-选择一张【杀】弃置并标记目标', (c: Card) => isSlash(c), ctx) ?? -1;
+    if (cardIdx < 0) return false;
+    const card = player.handCards.splice(cardIdx, 1)[0];
+    this.deck.sendToDiscard(card);
+
+    const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+    const targetId = await driver.promptTarget(player, aliveOthers.map(p => p.id), '调停-选择标记目标', ctx);
+    if (targetId === null) { player.handCards.splice(cardIdx, 0, card); return false; }
+
+    data.chascaMediateUsed = true;
+    data.chascaMediateTarget = targetId;
+    const target = aliveOthers.find(p => p.id === targetId)!;
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【调停】${player.name} 弃置了 ${getCardDetail(card)}，标记 ${target.name}！该角色回合内使用杀/决斗时将先受1点伤害。`
+    });
+    VoiceManager.getInstance().playSkillVoice('chasca', '调停', player.id);
+    return true;
+  }
+
+  /** 恰斯卡-调停：检查目标使用杀/决斗时先受伤（可多次触发，持续到目标回合结束） */
+  async chascaMediateOnSlashOrDuel(target: PlayerState): Promise<boolean> {
+    // 查找谁给这个目标标记了调停
+    for (const p of this.allPlayers) {
+      if (p.heroId !== 'chasca' || p.isDead) continue;
+      const data = this.getData(p.id);
+      if (data.chascaMediateTarget === target.id) {
+        // 不消除标记，持续到目标回合结束（resetTurnFlags清除）
+        await this.damageSystem.applyHpChange(target, -1, null as any, p);
+        this.eventBus.emit(GameEvent.Log, {
+          message: `【调停】${target.name} 使用了杀/决斗，先受到 ${p.name} 的1点伤害！HP: ${target.hp}/${target.maxHp}`
+        });
+        VoiceManager.getInstance().playSkillVoice('chasca', '调停', p.id);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ======================== 克洛琳德-剧团 全局状态 ========================
+
+  private _clorindeTroupeActive: boolean = false;
+
+  /** 是否处于剧团禁技状态 */
+  isClorindeTroupeActive(): boolean {
+    return this._clorindeTroupeActive;
+  }
+
+  setClorindeTroupeActive(active: boolean): void {
+    this._clorindeTroupeActive = active;
+  }
+
+  // ========== 林尼 - 魔术·奇迹 ==========
+
+  private addLyneySkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({
+      id: 'lyney_magic', name: '魔术',
+      description: `将一张手牌置于桌面，令其他角色猜基本/非基本：猜对回1血，猜错流失1血。然后你摸X张牌(X=猜错数)，最后交出此牌。${data.lyneyMagicUsed ? '（本回合已使用）' : ''}`,
+      type: 'active',
+      usable: (p, c) => !this.getData(p.id).lyneyMagicUsed && p.id === (c.currentPlayerId) && p.handCards.length > 0,
+    });
+    skills.push({
+      id: 'lyney_miracle', name: '奇迹',
+      description: `每局限一次，手牌首次为0时，摸牌至体力上限。${data.lyneyMiracleUsed ? '（本局限已使用）' : ''}`,
+      type: 'trigger', usable: () => false,
+    });
+  }
+
+  /** 林尼-魔术 */
+  private async lyneyMagic(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+    // 选择一张手牌
+    const cardIdx = await driverAny.promptSelectCard?.(player, '魔术-选择一张手牌置于桌面', () => true, ctx) ?? -1;
+    if (cardIdx < 0 || cardIdx >= player.handCards.length) return false;
+    const magicCard = player.handCards.splice(cardIdx, 1)[0];
+    const isBasic = magicCard.type === CardType.Basic;
+
+    this.eventBus.emit(GameEvent.Log, { message: `【魔术】${player.name} 将一张牌背面朝上置于桌面！` });
+    this.eventBus.emit(GameEvent.CardRevealed, { playerId: player.id, card: magicCard, cardName: '???' });
+    VoiceManager.getInstance().playSkillVoice('lyney', '魔术', player.id);
+
+    data.lyneyMagicUsed = true;
+    let wrongCount = 0;
+
+    // 其他角色依次猜测
+    const others = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+    const startIdx = this.allPlayers.indexOf(player);
+
+    for (const other of others) {
+      if (other.isDead) continue;
+      const otherDriver = this.drivers.get(other.id)!;
+      const otherAny = otherDriver as any;
+      // 请角色猜测
+      const guess = await otherAny.promptMagicGuess?.(other, this.buildContext(other.id));
+      // guess: true=基本牌, false=非基本牌
+      const guessedBasic = guess !== undefined ? guess : (Math.random() > 0.5); // 默认随机
+      const isCorrect = (isBasic && guessedBasic) || (!isBasic && !guessedBasic);
+
+      if (isCorrect) {
+        other.hp = Math.min(other.maxHp, other.hp + 1);
+        this.eventBus.emit(GameEvent.HpChanged, { playerId: other.id, newHp: other.hp, maxHp: other.maxHp, delta: 1, isDamage: false });
+        this.eventBus.emit(GameEvent.Log, { message: `${other.name} 猜对了！回复1点体力。HP: ${other.hp}/${other.maxHp}` });
+      } else {
+        await this.damageSystem.applyHealthLoss(other, 1, player.name);
+        this.eventBus.emit(GameEvent.Log, { message: `${other.name} 猜错了！流失1点体力。HP: ${other.hp}/${other.maxHp}` });
+        wrongCount++;
+      }
+    }
+
+    // 摸X张牌
+    if (wrongCount > 0) {
+      this.deck.drawCards(player, wrongCount);
+      this.eventBus.emit(GameEvent.Log, { message: `【魔术】猜错角色数: ${wrongCount}，${player.name} 摸${wrongCount}张牌。` });
+    }
+
+    // 选择一名角色交出此牌
+    const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+    const targetId = await driver.promptTarget(player, aliveOthers.map(p => p.id), '魔术-将牌交给谁？', ctx);
+    if (targetId !== null && targetId !== undefined) {
+      const target = aliveOthers.find(p => p.id === targetId);
+      if (target) {
+        target.handCards.push(magicCard);
+        this.eventBus.emit(GameEvent.Log, { message: `${player.name} 将 ${getCardDetail(magicCard)} 交给了 ${target.name}。` });
+      }
+    } else {
+      player.handCards.push(magicCard);
+    }
+
+    return true;
+  }
+
+  /** 林尼-奇迹：手牌首次为0时触发 */
+  checkLyneyMiracle(player: PlayerState): void {
+    if (player.heroId !== 'lyney') return;
+    const data = this.getData(player.id);
+    if (data.lyneyMiracleUsed) return;
+    if (player.handCards.length === 0) {
+      data.lyneyMiracleUsed = true;
+      const drawCount = player.maxHp;
+      this.deck.drawCards(player, drawCount);
+      this.eventBus.emit(GameEvent.Log, { message: `【奇迹】${player.name} 手牌为0，摸牌至体力上限（${drawCount}张）！` });
+      VoiceManager.getInstance().playSkillVoice('lyney', '奇迹', player.id);
+    }
+  }
+
+  // ========== 娜维娅 - 刺玫·说服 ==========
+
+  private addNaviaSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({
+      id: 'navia_rose', name: '刺玫',
+      description: '锁定技，你受到的伤害恒为1。',
+      type: 'passive', usable: () => false,
+    });
+    skills.push({
+      id: 'navia_persuade', name: '说服',
+      description: `出牌阶段限一次。交给其一张手牌→其下回合不能出杀；或获得其一张手牌→其下回合不能成为杀目标。${data.naviaPersuadeUsed ? '（本回合已使用）' : ''}`,
+      type: 'active',
+      usable: (p, c) => !this.getData(p.id).naviaPersuadeUsed && p.id === (c.currentPlayerId) && p.handCards.length > 0,
+    });
+  }
+
+  /** 娜维娅-刺玫：伤害恒为1（在DamageSystem中hook） */
+  naviaRoseDamageLimit(damageRef: { value: number }): void {
+    damageRef.value = Math.min(damageRef.value, 1);
+  }
+
+  /** 娜维娅-说服 */
+  private async naviaPersuade(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+
+    // 选择效果：效果1(给牌禁杀) 或 效果2(拿牌禁目标)
+    const mode = await driverAny.promptNaviaPersuadeMode?.(player, ctx) ?? 0;
+    if (mode !== 1 && mode !== 2) return false;
+
+    data.naviaPersuadeUsed = true;
+
+    if (mode === 1) {
+      // 效果1：选一张牌，选一名角色，交出去，其下回合不能出杀
+      const cardIdx = await driverAny.promptSelectCard?.(player, '说服-选择一张手牌交给目标', () => true, ctx) ?? -1;
+      if (cardIdx < 0 || cardIdx >= player.handCards.length) return false;
+      const card = player.handCards.splice(cardIdx, 1)[0];
+      const others = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+      const targetId = await driver.promptTarget(player, others.map(p => p.id), '说服-交给谁？（其下回合不能出杀）', ctx);
+      if (targetId === null || targetId === undefined) { player.handCards.splice(cardIdx, 0, card); return false; }
+      const target = others.find(p => p.id === targetId)!;
+      target.handCards.push(card);
+      const tData = this.getData(target.id);
+      tData.naviaNoSlash = true;
+      this.eventBus.emit(GameEvent.Log, { message: `【说服】${player.name} 交给 ${target.name} 一张牌，${target.name} 下回合不能使用【杀】。` });
+      VoiceManager.getInstance().playSkillVoice('navia', '说服', player.id);
+    } else {
+      // 效果2：选一名有手牌的角色，获得其一张牌，其下回合不能成为杀目标
+      const handOwners = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id && p.handCards.length > 0);
+      if (handOwners.length === 0) return false;
+      const targetId = await driver.promptTarget(player, handOwners.map(p => p.id), '说服-获得谁的手牌？（其下回合不能成为杀目标）', ctx);
+      if (targetId === null || targetId === undefined) return false;
+      const target = handOwners.find(p => p.id === targetId)!;
+      const targetDriver = this.drivers.get(target.id)!;
+      const targetAny = targetDriver as any;
+      // 展示目标手牌（从对方手中选一张）
+      const pickIdx = await targetAny.promptSelectCard?.(target, `说服-${player.name}将获得你的一张手牌`, () => true, this.buildContext(target.id)) ?? 0;
+      if (pickIdx < 0 || pickIdx >= target.handCards.length) return false;
+      const stolen = target.handCards.splice(pickIdx, 1)[0];
+      player.handCards.push(stolen);
+      const tData = this.getData(target.id);
+      tData.naviaNoSlashTarget = true;
+      this.eventBus.emit(GameEvent.Log, { message: `【说服】${player.name} 获得了 ${target.name} 的一张牌，${target.name} 下回合不能成为【杀】的目标。` });
+      VoiceManager.getInstance().playSkillVoice('navia', '说服', player.id);
+    }
+    return true;
+  }
+
+  /** 娜维娅-说服：清除标记（每回合开始时清除上回合标记） */
+  resetNaviaPersuadeMarks(player: PlayerState): void {
+    const data = this.getData(player.id);
+    data.naviaNoSlash = false;
+    data.naviaNoSlashTarget = false;
+  }
+
+  // ========== 克洛琳德 - 决斗·剧团 ==========
+
+  private addClorindeSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({
+      id: 'clorinde_duel', name: '决斗',
+      description: `出牌阶段限一次，从牌堆摸1张牌，本回合该牌及以上点数的手牌可当【决斗】打出。${data.clorindeDuelUsed ? '（本回合已使用）' : ''}${data.clorindeDuelValue !== undefined ? ` 当前阈值: ${data.clorindeDuelValue}` : ''}`,
+      type: 'active',
+      usable: (p, c) => !this.getData(p.id).clorindeDuelUsed && p.id === (c.currentPlayerId),
+    });
+    skills.push({
+      id: 'clorinde_troupe', name: '剧团',
+      description: `每局限一次，禁用场上所有角色的技能，直到你阵亡或你的下一回合开始。${this._clorindeTroupeActive ? '（已启动）' : ''}${data.clorindeTroupeUsed ? '（本局限已使用）' : ''}`,
+      type: 'active',
+      usable: (p, c) => !this.getData(p.id).clorindeTroupeUsed && !this._clorindeTroupeActive && p.id === (c.currentPlayerId),
+    });
+  }
+
+  /** 克洛琳德-决斗 */
+  private async clorindeDuel(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    const drawn = this.deck.dealOneCard();
+    if (!drawn) return false;
+    const duelValue = drawn.number;
+    data.clorindeDuelUsed = true;
+    data.clorindeDuelValue = duelValue;
+    player.handCards.push(drawn);
+    this.eventBus.emit(GameEvent.Log, {
+      message: `【决斗】${player.name} 从牌堆摸到了 ${getCardDetail(drawn)}（点数${duelValue}），本回合点数≥${duelValue}的手牌可当【决斗】打出！`
+    });
+    VoiceManager.getInstance().playSkillVoice('clorinde', '决斗', player.id);
+    return true;
+  }
+
+  /** 克洛琳德-剧团 */
+  private async clorindeTroupe(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    data.clorindeTroupeUsed = true;
+    this._clorindeTroupeActive = true;
+    this.eventBus.emit(GameEvent.Log, { message: `【剧团】${player.name} 禁用了全场所有角色的技能！` });
+    VoiceManager.getInstance().playSkillVoice('clorinde', '剧团', player.id);
+    return true;
+  }
+
+  // ========== 希格雯 - 护士·温度 ==========
+
+  private addSigewinneSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
+    const data = this.getData(player.id);
+    skills.push({
+      id: 'sigewinne_nurse', name: '护士',
+      description: `出牌阶段限一次，弃置一张【桃】，令一名其他角色回复1点体力。${data.sigewinneNurseUsed ? '（本回合已使用）' : ''}`,
+      type: 'active',
+      usable: (p, c) => !this.getData(p.id).sigewinneNurseUsed && p.id === (c.currentPlayerId) && p.handCards.some(card => card.name === '桃'),
+    });
+    skills.push({
+      id: 'sigewinne_temp', name: '温度',
+      description: '锁定技，你打出【桃】时，回复量+2。',
+      type: 'passive', usable: () => false,
+    });
+  }
+
+  /** 希格雯-护士 */
+  private async sigewinneNurse(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    const data = this.getData(player.id);
+    const driver = this.drivers.get(player.id)!;
+    const driverAny = driver as any;
+    // 选择一张桃弃置
+    const peachIdx = player.handCards.findIndex(c => c.name === '桃');
+    if (peachIdx < 0) return false;
+    const cardIdx = await driverAny.promptSelectCard?.(player, '护士-选择一张【桃】弃置', (c: Card) => c.name === '桃', ctx) ?? peachIdx;
+    if (cardIdx < 0 || cardIdx >= player.handCards.length || player.handCards[cardIdx].name !== '桃') return false;
+    const peach = player.handCards.splice(cardIdx, 1)[0];
+    this.deck.sendToDiscard(peach);
+
+    // 选择目标
+    const others = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
+    const targetId = await driver.promptTarget(player, others.map(p => p.id), '护士-令谁回复体力？', ctx);
+    if (targetId === null || targetId === undefined) { player.handCards.splice(cardIdx, 0, peach); return false; }
+    const target = others.find(p => p.id === targetId)!;
+
+    data.sigewinneNurseUsed = true;
+    target.hp = Math.min(target.maxHp, target.hp + 1);
+    this.eventBus.emit(GameEvent.HpChanged, { playerId: target.id, newHp: target.hp, maxHp: target.maxHp, delta: 1, isDamage: false });
+    this.eventBus.emit(GameEvent.Log, { message: `【护士】${player.name} 弃置【桃】令 ${target.name} 回复1点体力。HP: ${target.hp}/${target.maxHp}` });
+    VoiceManager.getInstance().playSkillVoice('sigewinne', '护士', player.id);
+    return true;
+  }
+
+  /** 希格雯-温度：桃回复量+2（外部检测） */
+  isSigewinneTempActive(player: PlayerState): boolean {
+    return player.heroId === 'sigewinne';
   }
 }

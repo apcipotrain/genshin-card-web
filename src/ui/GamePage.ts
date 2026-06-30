@@ -24,6 +24,7 @@ import { DelayedAIDriver } from '../ai/DelayedAIDriver';
 import { SkillManager } from '../core/skills/SkillManager';
 import { HeroData, ALL_HEROES, getGods, getNonGods, getHeroById } from '../data/heroes';
 import { PVELevel, getLevelById, getCandidatePool, pickAIAllyHeroes, getTotalPlayers, getChapterForLevel, savePVEStar, getPVEStarRecords } from '../data/PVELevels';
+import { VoiceManager, VOICE_PLAY_EVENT, VoicePlayEventDetail } from '../audio/VoiceManager';
 // ======================== 常量 ========================
 const SUIT_SYMBOL: Record<string, string> = {
   Spade: '♠', Heart: '♥', Club: '♣', Diamond: '♦', None: '',
@@ -44,7 +45,8 @@ const CARD_FILE_NAME_MAP: Record<string, string> = {
 };
 
 // ======================== 全局AI延迟（PVE模式，运行时可通过设置面板调整） ========================
-let globalAiDelayMs = 1600; // 默认1.6秒（推荐速度）
+import { cacheGet, cacheSave, syncAllSettings } from '../data/SettingsCache';
+let globalAiDelayMs = 1600; // 默认1.6秒（推荐速度），从服务端同步后更新
 
 // ======================== 人类玩家 Web UI Driver（点击交互版） ========================
 class HumanWebUIDriver {
@@ -104,6 +106,7 @@ class HumanWebUIDriver {
       const zibaiHint = state.heroId === 'zibai' && ctx.cardsPlayedThisPhase !== undefined
         ? ` (第${ctx.cardsPlayedThisPhase + 1}张)` : '';
       this.gamePage.showPrompt(`出牌阶段 - 点击手牌出牌，或点"结束出牌"${zibaiHint}`);
+      this.gamePage.startPVPCountdown(15);
     });
   }
   async promptTarget(state: PlayerState, validTargets: number[], reason: string, ctx: GameContextSnapshot): Promise<number | null> {
@@ -112,17 +115,19 @@ class HumanWebUIDriver {
       this.gamePage.clearHighlights();
       this.gamePage.highlightTargets(validTargets, reason);
       this.gamePage.showPrompt(`选择目标 - ${reason}`);
+      this.gamePage.startPVPCountdown(15);
     });
   }
   async promptResponse(state: PlayerState, cardName: string, ctx: GameContextSnapshot): Promise<Card | null> {
     return new Promise(resolve => {
-      // 30秒超时保护
+      // 超时保护
       const timer = setTimeout(() => {
         if (this.resolveMap.has('response')) {
           this.clearResolve('response');
           this.gamePage.clearHighlights();
           this.gamePage.hidePrompt();
           this.gamePage.hideResponseButtons();
+          this.gamePage.stopPVPCountdown();
           resolve(null);
         }
       }, 30000);
@@ -135,15 +140,35 @@ class HumanWebUIDriver {
       });
       let validCards: Card[];
       if (cardName.startsWith('花色:')) {
-        const suit = cardName.split(':')[1];
+        const parts = cardName.split(':');
+        const suit = parts[2] || parts[1]; // 格式: 花色:♥:Heart
         validCards = state.handCards.filter(c => c.suit === suit);
       } else if (cardName === '杀') {
         validCards = state.handCards.filter(c => isSlash(c));
+        // 妮露-水月：红色牌可当杀
+        const nilouStance = (ctx as any).nilouStance;
+        if (state.heroId === 'nilou' && nilouStance === '水月') {
+          const redCards = state.handCards.filter(c =>
+            (c.suit === 'Heart' || c.suit === 'Diamond') && !validCards.some(v => v.id === c.id)
+          );
+          validCards.push(...redCards);
+        }
+      } else if (cardName === '闪') {
+        validCards = state.handCards.filter(c => c.name === '闪');
+        // 妮露-水环：黑色牌可当闪
+        const nilouStance = (ctx as any).nilouStance;
+        if (state.heroId === 'nilou' && nilouStance === '水环') {
+          const blackCards = state.handCards.filter(c =>
+            (c.suit === 'Spade' || c.suit === 'Club') && !validCards.some(v => v.id === c.id)
+          );
+          validCards.push(...blackCards);
+        }
       } else {
         validCards = state.handCards.filter(c => c.name === cardName);
       }
       this.gamePage.clearHighlights();
       this.gamePage.highlightResponseCards(validCards, cardName);
+      this.gamePage.startPVPCountdown(15);
     });
   }
   async promptZone(state: PlayerState, targetId: number, ctx: GameContextSnapshot): Promise<ZoneSelection | null> {
@@ -168,37 +193,65 @@ class HumanWebUIDriver {
       const excess = state.handCards.length - limit;
       this.gamePage.highlightDiscardCards(state, excess, limit);
       this.gamePage.showPrompt(`弃牌阶段 - 还需弃置 ${excess} 张牌（手牌 ${state.handCards.length}/${limit}）`);
+      this.gamePage.startPVPCountdown(15);
     });
   }
   async promptNullification(state: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
     const hasNullify = state.handCards.some(c => c.name === '无懈可击');
     if (!hasNullify) return false;
 
-    // 益类锦囊（五谷丰登、桃园结义、无中生有）不无懈
+    // 益类锦囊（五谷丰登、桃园结义）不无懈；无中生有允许无懈（PVP对手必须能反制）
     const cardName = ctx.nullifyCardName || '';
-    const BENEFICIAL = ['五谷丰登', '桃园结义', '无中生有'];
+    const BENEFICIAL = ['五谷丰登', '桃园结义'];
     if (BENEFICIAL.includes(cardName)) return false;
 
-    // 如果锦囊来源是己方盟友且不是自己，不无懈（别坑队友，但自己的延迟判定牌可无懈）
+    // 如果锦囊来源是己方盟友且不是自己，不无懈
     const sourceId = ctx.nullifySourceId;
     if (sourceId !== undefined && sourceId !== state.id) {
       const source = ctx.players.find(p => p.id === sourceId);
       if (source && !this.isHostile(state, source)) return false;
     }
 
+    // 五谷丰登弹窗内嵌无懈可击区域
+    if (this.gamePage.graceOverlay) {
+      return new Promise(resolve => {
+        this.setResolve('nullify', resolve);
+        (this.gamePage as any).renderGraceNullifySection(state);
+        setTimeout(() => {
+          if (this.resolveMap.has('nullify')) {
+            this.clearResolve('nullify');
+            resolve(false);
+            (this.gamePage as any).removeGraceNullifySection();
+          }
+        }, 5000);
+      });
+    }
+
+    // 普通锦囊：使用模态弹窗（确定=打出无懈，取消=不打出），5秒超时自动取消
     return new Promise(resolve => {
-      this.setResolve('nullify', resolve);
-      this.gamePage.clearHighlights();
+      const timer = setTimeout(() => {
+        this.clearResolve('nullify');
+        resolve(false);
+        this.gamePage.hidePrompt();
+      }, 5000);
+      this.setResolve('nullify', (value: boolean) => {
+        clearTimeout(timer);
+        resolve(value);
+      });
+      this.gamePage.showPrompt('是否打出【无懈可击】？（点手牌中亮起的无懈可击打出，5秒后自动跳过）');
       this.gamePage.highlightNullifyCards(state);
-      if (!this.gamePage.graceOverlay) {
-        this.gamePage.showPrompt('是否打出【无懈可击】？点击无懈可击打出，否则12秒后自动跳过');
-      }
-      setTimeout(() => { if (this.resolveMap.has('nullify')) { this.clearResolve('nullify'); resolve(false); this.gamePage.clearHighlights(); this.gamePage.restoreGraceOverlayZIndex(); } }, 12000);
     });
   }
 
-  /** 判断对方是否是敌对阵营（基于身份） */
+  /** 判断对方是否是敌对阵营（基于PVE faction或PVP身份） */
   private isHostile(me: PlayerState, other: PlayerState): boolean {
+    // PVE模式：基于阵营（faction）判定敌友
+    const myFaction = (me as any).faction as string | undefined;
+    const otherFaction = (other as any).faction as string | undefined;
+    if (myFaction && otherFaction) {
+      return myFaction !== otherFaction;
+    }
+    // PVP模式：基于身份判定
     if (me.role === RoleType.None || other.role === RoleType.None) return true;
     if (me.role === RoleType.Monarch) {
       return other.role === RoleType.Rebel || other.role === RoleType.Traitor;
@@ -230,8 +283,11 @@ class HumanWebUIDriver {
       });
     } else {
       // 新式: (state, title, filter, ctx) — 根据filter过滤手牌后选择（有取消按钮）
-      const filter = arg3 as ((c: Card) => boolean);
-      const validCards = state.handCards.filter(filter);
+      // PVP 模式下 filter 无法序列化，arg3 可能是 ctx 对象而非函数
+      const filterFn = typeof arg3 === 'function' ? arg3 as ((c: Card) => boolean) : undefined;
+      const validCards = filterFn
+        ? state.handCards.filter(filterFn)
+        : [...state.handCards]; // PVP：无法传filter，显示所有手牌
       if (validCards.length === 0) return -1;
       return new Promise(resolve => {
         this.setResolve('selectCard', resolve);
@@ -301,6 +357,7 @@ class HumanWebUIDriver {
       this.gamePage.clearHighlights();
       this.gamePage.highlightShowCards(state);
       this.gamePage.showPrompt('火攻 - 选择一张手牌展示');
+      this.gamePage.startPVPCountdown(15);
     });
   }
   async promptGenderWeapon(state: PlayerState, attackerName: string, ctx: GameContextSnapshot): Promise<'discard' | 'draw'> {
@@ -319,41 +376,49 @@ class HumanWebUIDriver {
   // PVP 双通道：所有 resolveXxx 先触发 pvpRespond（socket 响应），再正常 resolve Promise
   resolvePlayCard(index: number) {
     this.pvpRespond?.(index);
+    this.gamePage.stopPVPCountdown();
     const r = this.resolveMap.get('playCard');
     if (r) { this.clearResolve('playCard'); r(index); }
   }
   resolveSelectCard(index: number) {
     this.pvpRespond?.(index);
+    this.gamePage.stopPVPCountdown();
     const r = this.resolveMap.get('selectCard');
     if (r) { this.clearResolve('selectCard'); r(index); }
   }
   resolveTarget(targetId: number | null) {
     this.pvpRespond?.(targetId);
+    this.gamePage.stopPVPCountdown();
     const r = this.resolveMap.get('target');
     if (r) { this.clearResolve('target'); r(targetId); }
   }
   resolveResponse(card: Card | null) {
     this.pvpRespond?.(card);
+    this.gamePage.stopPVPCountdown();
     const r = this.resolveMap.get('response');
     if (r) { this.clearResolve('response'); r(card); }
   }
   resolveZone(sel: ZoneSelection | null) {
     this.pvpRespond?.(sel);
+    this.gamePage.stopPVPCountdown();
     const r = this.resolveMap.get('zone');
     if (r) { this.clearResolve('zone'); r(sel); }
   }
   resolveDiscard(index: number) {
     this.pvpRespond?.(index);
+    this.gamePage.stopPVPCountdown();
     const r = this.resolveMap.get('discard');
     if (r) { this.clearResolve('discard'); r(index); }
   }
   resolveNullify(value: boolean) {
     this.pvpRespond?.(value);
+    this.gamePage.stopPVPCountdown();
     const r = this.resolveMap.get('nullify');
     if (r) { this.clearResolve('nullify'); r(value); }
   }
   resolveShowCard(index: number) {
     this.pvpRespond?.(index);
+    this.gamePage.stopPVPCountdown();
     const r = this.resolveMap.get('showCard');
     if (r) { this.clearResolve('showCard'); r(index); }
   }
@@ -373,7 +438,7 @@ export class GamePage {
   private bgmAudio: HTMLAudioElement | null = null;
 
   
-  private bgmVolume = 0.3;
+  private bgmVolume = cacheGet('bgmVolume', 30) / 100;
   /** 背景壁纸轮播 */
   private wallpaperRegionBase: number = 10; // 默认蒙德：10-19
   private wallpaperLastMinute: number = -1;
@@ -390,7 +455,7 @@ export class GamePage {
   private pvePickIndex: number = 0;
   /** PVE 闯关模式：座位布局（pveSeatIndex → playerId 映射） */
   private pveSeatMap: Map<number, number> = new Map();
-  private isBgmOn = true;
+  private isBgmOn = cacheGet('bgmEnabled', true);
   private bgmBattlePath: string | null = null; // 战斗BGM路径
   private bgmSwitchTimer: any = null; // 切换到战斗BGM的定时器
 
@@ -399,6 +464,14 @@ export class GamePage {
   private pvpMyPlayerId = -1; // PVP 中自己的 playerId（来自 game_start）
   private pvpRequestId: string | null = null; // 当前 prompt 的 requestId
   private pvpUnsubs: Array<() => void> = []; // socket 事件注销回调
+
+  // PVP 操作读条倒计时
+  private pvpCountdownBarEl!: HTMLElement;
+  private pvpCountdownFillEl!: HTMLElement;
+  private pvpCountdownTextEl!: HTMLElement;
+  private pvpCountdownTimer: ReturnType<typeof setInterval> | null = null;
+  private pvpCountdownRemaining: number = 0;
+  private pvpCountdownTotal: number = 15;
 
   // 选将
   private heroesPicked: HeroData[] = [];
@@ -462,6 +535,11 @@ export class GamePage {
           </div>
           <div class="game-phase" id="game-phase">等待开始...</div>
           <div class="game-top-right">
+            <!-- PVP 操作读条倒计时（仅PVP模式显示） -->
+            <div class="pvp-countdown-bar" id="pvp-countdown-bar" style="display:none;">
+              <div class="pvp-countdown-fill" id="pvp-countdown-fill"></div>
+              <span class="pvp-countdown-text" id="pvp-countdown-text">10s</span>
+            </div>
             <span class="deck-remaining">⏱ <span class="count" id="game-timer">00:00</span></span>
             <span class="deck-remaining" style="margin-left:12px;">牌堆：<span class="count" id="deck-count">160</span></span>
             <span style="margin-left:12px;">第 <span id="round-label">0</span> 轮 · 第 <span id="round-num">0</span> 回合</span>
@@ -525,6 +603,15 @@ export class GamePage {
               <span id="volume-label">30%</span>
             </div>
             <div class="settings-row">
+              <span>角色语音</span>
+              <div class="toggle-switch on" id="settings-voice-toggle"></div>
+            </div>
+            <div class="settings-row">
+              <span>语音音量</span>
+              <input type="range" min="0" max="100" value="70" class="volume-slider" id="settings-voice-volume" />
+              <span id="voice-volume-label">70%</span>
+            </div>
+            <div class="settings-row">
               <span>AI出牌时间</span>
               <select class="settings-select" id="settings-ai-delay">
                 <option value="300">0.3秒（极速）</option>
@@ -570,6 +657,10 @@ export class GamePage {
     this.animLayer = this.el.querySelector('#anim-layer')!;
     // 侧栏技能区
     this.sidebarSkillsEl = this.el.querySelector('#sidebar-skills')!;
+    // PVP 倒计时条
+    this.pvpCountdownBarEl = this.el.querySelector('#pvp-countdown-bar')!;
+    this.pvpCountdownFillEl = this.el.querySelector('#pvp-countdown-fill')!;
+    this.pvpCountdownTextEl = this.el.querySelector('#pvp-countdown-text')!;
   }
 
   private bindSettings(): void {
@@ -582,6 +673,21 @@ export class GamePage {
     });
     const settingsOverlay = this.el.querySelector('#settings-overlay')! as HTMLElement;
     this.el.querySelector('#game-settings-btn')!.addEventListener('click', () => {
+      // 同步设置面板UI与当前状态
+      const bgmToggle = this.el.querySelector('#settings-bgm-toggle')!;
+      bgmToggle.classList.toggle('on', this.isBgmOn);
+      const volumeSlider = this.el.querySelector('#settings-volume')! as HTMLInputElement;
+      volumeSlider.value = String(Math.round(this.bgmVolume * 100));
+      const volumeLabel = this.el.querySelector('#volume-label')!;
+      volumeLabel.textContent = Math.round(this.bgmVolume * 100) + '%';
+      const aiDelaySelect = this.el.querySelector('#settings-ai-delay')! as HTMLSelectElement;
+      aiDelaySelect.value = String(globalAiDelayMs);
+      const voiceToggle = this.el.querySelector('#settings-voice-toggle')!;
+      voiceToggle.classList.toggle('on', VoiceManager.getInstance().isEnabled);
+      const voiceVolumeSlider = this.el.querySelector('#settings-voice-volume')! as HTMLInputElement;
+      voiceVolumeSlider.value = String(Math.round(VoiceManager.getInstance().getVolume() * 100));
+      const voiceVolumeLabel = this.el.querySelector('#voice-volume-label')!;
+      voiceVolumeLabel.textContent = Math.round(VoiceManager.getInstance().getVolume() * 100) + '%';
       settingsOverlay.style.display = 'flex';
     });
     this.el.querySelector('#settings-close')!.addEventListener('click', () => {
@@ -595,6 +701,7 @@ export class GamePage {
       this.isBgmOn = !this.isBgmOn;
       bgmToggle.classList.toggle('on', this.isBgmOn);
       if (this.bgmAudio) this.bgmAudio.muted = !this.isBgmOn;
+      cacheSave('bgmEnabled', this.isBgmOn, (d) => socketManager.emit('save_settings', d));
     });
     const volumeSlider = this.el.querySelector('#settings-volume')! as HTMLInputElement;
     const volumeLabel = this.el.querySelector('#volume-label')!;
@@ -603,11 +710,32 @@ export class GamePage {
       this.bgmVolume = vol;
       volumeLabel.textContent = Math.round(vol * 100) + '%';
       if (this.bgmAudio) this.bgmAudio.volume = vol;
+      cacheSave('bgmVolume', parseInt(volumeSlider.value), (d) => socketManager.emit('save_settings', d));
     });
     // AI出牌时间
     const aiDelaySelect = this.el.querySelector('#settings-ai-delay')! as HTMLSelectElement;
     aiDelaySelect.addEventListener('change', () => {
       globalAiDelayMs = parseInt(aiDelaySelect.value);
+      cacheSave('aiDelay', parseInt(aiDelaySelect.value), (d) => socketManager.emit('save_settings', d));
+    });
+    // 角色语音开关
+    const voiceToggle = this.el.querySelector('#settings-voice-toggle')!;
+    const voiceMgr = VoiceManager.getInstance();
+    voiceToggle.classList.toggle('on', voiceMgr.isEnabled);
+    voiceToggle.addEventListener('click', () => {
+      const newState = !voiceMgr.isEnabled;
+      voiceMgr.setEnabled(newState);
+      voiceToggle.classList.toggle('on', newState);
+    });
+    // 语音音量
+    const voiceVolumeSlider = this.el.querySelector('#settings-voice-volume')! as HTMLInputElement;
+    const voiceVolumeLabel = this.el.querySelector('#voice-volume-label')!;
+    voiceVolumeSlider.value = String(Math.round(voiceMgr.getVolume() * 100));
+    voiceVolumeLabel.textContent = Math.round(voiceMgr.getVolume() * 100) + '%';
+    voiceVolumeSlider.addEventListener('input', () => {
+      const vol = parseInt(voiceVolumeSlider.value) / 100;
+      voiceMgr.setVolume(vol);
+      voiceVolumeLabel.textContent = Math.round(vol * 100) + '%';
     });
   }
 
@@ -681,9 +809,13 @@ export class GamePage {
     // 缓存 cross-fade 元素
     this.wallpaperCrossEl = this.el.querySelector('#game-bg-cross')! as HTMLElement;
 
-    // 初始壁纸
+    // 初始壁纸：从池中随机选一张
     const bgEl = this.el.querySelector('#game-bg')! as HTMLElement;
-    const firstWallpaper = `Resources/Backgrounds/${this.wallpaperRegionBase}.png`;
+    // 初始化壁纸池并随机选首图
+    this.wallpaperPool = Array.from({ length: 10 }, (_, i) => this.wallpaperRegionBase + i);
+    const firstIdx = Math.floor(Math.random() * this.wallpaperPool.length);
+    const firstNum = this.wallpaperPool.splice(firstIdx, 1)[0];
+    const firstWallpaper = `Resources/Backgrounds/${firstNum}.png`;
     bgEl.style.backgroundImage = `url('${firstWallpaper}')`;
     this.wallpaperCrossEl.style.backgroundImage = `url('${firstWallpaper}')`;
     this.wallpaperCrossEl.style.opacity = '0';
@@ -732,28 +864,24 @@ export class GamePage {
     this.wallpaperLastMinute = 0;
   }
 
-  /** 壁纸随机播放序列（每10张一组，随机打乱后依次播放，播完再洗牌） */
-  private wallpaperShuffle: number[] = [];
-  private wallpaperShuffleIdx = 0;
+  /** 壁纸池式真随机：当前周期内剩余未显示的壁纸编号列表 */
+  private wallpaperPool: number[] = [];
 
-  /** 每分钟切换壁纸（由计时器调用） */
+  /** 每分钟切换壁纸（由计时器调用）—— 池式随机，每10分钟确保轮完一组 */
   private tickWallpaper(): void {
     if (this.wallpaperRegionBase <= 0) return;
     const minute = Math.floor(this.timerSeconds / 60);
     if (minute === this.wallpaperLastMinute) return;
     this.wallpaperLastMinute = minute;
 
-    // 每秒检查，但同一分钟只切一次
-    // 随机序列：如果当前序列为空或已播完，重新 Fisher-Yates 洗牌
-    if (this.wallpaperShuffle.length === 0 || this.wallpaperShuffleIdx >= this.wallpaperShuffle.length) {
-      this.wallpaperShuffle = Array.from({ length: 10 }, (_, i) => this.wallpaperRegionBase + i);
-      for (let i = this.wallpaperShuffle.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [this.wallpaperShuffle[i], this.wallpaperShuffle[j]] = [this.wallpaperShuffle[j], this.wallpaperShuffle[i]];
-      }
-      this.wallpaperShuffleIdx = 0;
+    // 池子为空或首次 → 重新填充10张壁纸（base ~ base+9）
+    if (this.wallpaperPool.length === 0) {
+      this.wallpaperPool = Array.from({ length: 10 }, (_, i) => this.wallpaperRegionBase + i);
     }
-    const wallpaperNum = this.wallpaperShuffle[this.wallpaperShuffleIdx++];
+
+    // 从池中随机选一张
+    const pickIdx = Math.floor(Math.random() * this.wallpaperPool.length);
+    const wallpaperNum = this.wallpaperPool.splice(pickIdx, 1)[0];
     const newBgUrl = `url('Resources/Backgrounds/${wallpaperNum}.png')`;
     const bgEl = this.el.querySelector('#game-bg')! as HTMLElement;
     const crossEl = this.wallpaperCrossEl;
@@ -856,14 +984,11 @@ export class GamePage {
 
   // ======================== 页面生命周期 ========================
   onEnter(state: RouteState): void {
+    this.mode = (state.params?.mode as 'pve' | 'pvp') || 'pve';
     // 先清理上一局残留状态（防止旧 PVP 监听器泄露到新对局）
     this.cleanupGame();
-    // 通知服务器离开旧房间（PVP 模式下避免留在旧 Socket.IO 房间收到旧事件）
-    if (this.pvpOnline || this.mode === 'pvp') {
-      socketManager.emit('leave_room');
-    }
+    // 注意：不要在此 emit leave_room —— onEnter 是进入新游戏，不是离开
 
-    this.mode = (state.params?.mode as 'pve' | 'pvp') || 'pve';
     this.roomId = (state.params?.roomId as string) || '';
     this.chapterId = (state.params?.chapterId as string) || '';
     this.levelId = (state.params?.levelId as number) || 0;
@@ -935,6 +1060,7 @@ export class GamePage {
       this.heroSelectEl.innerHTML = `
         <div class="hero-select-panel">
           <h2>👑 ${monarchPlayerName} 正在选将中...</h2>
+          <p style="text-align:center;color:var(--gold);">你的身份将在游戏开始后揭晓</p>
           <p style="text-align:center;color:var(--text-secondary);">请稍候，主公正在挑选武将</p>
           <div class="hero-select-hint">⏳ 请等待...</div>
         </div>
@@ -1069,6 +1195,7 @@ export class GamePage {
           this.pvpHeroSelectTimer = null;
         }
         // 发送选将结果到服务器
+        console.log(`[DEBUG:select] 点击选将: heroId=${hero.id} isMonarch=${isMonarch} socket.connected=${socketManager.isConnected}`);
         if (isMonarch) {
           socketManager.emit('select_monarch_hero', { heroId: hero.id });
         } else {
@@ -1098,7 +1225,11 @@ export class GamePage {
 
   /** 初始化PVP联机模式的Socket.IO事件监听 */
   private initPVPOnline(): void {
-    this.pvpUnsubs.push(socketManager.on('game_start', (data: any) => this.handlePVPGameStart(data)));
+    console.log('[DEBUG:select] initPVPOnline: 注册game_start/prompt等handler');
+    this.pvpUnsubs.push(socketManager.on('game_start', (data: any) => {
+      console.log('[DEBUG:select] ★★★ game_start 收到！data:', JSON.stringify(data).substring(0, 200));
+      this.handlePVPGameStart(data);
+    }));
     this.pvpUnsubs.push(socketManager.on('game_event', (data: any) => this.handlePVPGameEvent(data)));
     this.pvpUnsubs.push(socketManager.on('prompt', (data: any) => this.handlePVPPrompt(data)));
     this.pvpUnsubs.push(socketManager.on('game_over', (data: any) => this.handlePVPGameOver(data)));
@@ -1116,6 +1247,16 @@ export class GamePage {
     // 创建 HumanWebUIDriver（PVP 模式下仅用于UI交互，不驱动本地游戏循环）
     this.humanDriver = new HumanWebUIDriver(this.pvpMyPlayerId, this);
 
+    // PVP 也初始化本地 deck/eventBus/damageSystem，使 SkillManager.executeActiveSkill 可用
+    // （与 PVE initGameCore 一致，但不创建 GameFlowController）
+    this.eventBus = new EventBus();
+    this.deck = new DeckManager(this.eventBus);
+    this.deck.init(CARD_DATA);
+    const driversMap = new Map<number, IPlayerDriver>();
+    driversMap.set(this.pvpMyPlayerId, this.humanDriver as any as IPlayerDriver);
+    const damageSystem = new DamageSystem(this.deck, this.eventBus, driversMap, this.players);
+    this.skillManager = new SkillManager(this.deck, this.eventBus, damageSystem, driversMap, this.players);
+
     // 隐藏选将界面
     this.heroSelectEl.style.display = 'none';
 
@@ -1129,6 +1270,9 @@ export class GamePage {
     if (data.drawPileCount !== undefined) {
       this.deckCountEl.textContent = String(data.drawPileCount);
     }
+
+    // 注册技能语音动画监听（PVP 也需要）
+    this.setupVoiceAnimationListener();
 
     // 渲染初始战场
     this.renderBattlefield();
@@ -1210,6 +1354,7 @@ export class GamePage {
         break;
       }
       case 'TurnStarted': {
+        this.stopPVPCountdown(); // 新回合计清除残留读条
         this.phaseEl.textContent = `${eventData.playerName || ''}`;
         this.roundLabelEl.textContent = String(eventData.round || 0);
         this.roundNumEl.textContent = String(eventData.turn || 0);
@@ -1220,6 +1365,7 @@ export class GamePage {
         break;
       }
       case 'PhaseChanged': {
+        this.stopPVPCountdown(); // 阶段切换清除残留读条
         const phaseNames: Record<string, string> = {
           'Prepare': '准备阶段', 'Judging': '判定阶段', 'Draw': '摸牌阶段',
           'Play': '出牌阶段', 'Discard': '弃牌阶段', 'End': '回合结束',
@@ -1312,6 +1458,19 @@ export class GamePage {
         }
         break;
       }
+      case 'JudgeResult': {
+        // PVP判定牌动画
+        const jCardName = eventData.cardName as string;
+        const jSuit = eventData.suit as string || '';
+        const jNumber = eventData.number as number || 0;
+        const jTriggered = eventData.triggered as boolean;
+        const jIdx = (eventData.judgeIndex as number) || 0;
+        if (jCardName) {
+          this.animateJudge(jCardName, jSuit, jNumber, jTriggered, jIdx);
+        }
+        this.renderBattlefield();
+        break;
+      }
       case 'CardMovedToJudge': {
         this.renderBattlefield();
         break;
@@ -1366,6 +1525,25 @@ export class GamePage {
         this.renderBattlefield();
         break;
       }
+      case 'SkillVoicePlay': {
+        // PVP 语音：服务端广播的技能语音事件，本地播放
+        const vHeroId = eventData.heroId as string;
+        const vSkillName = eventData.skillName as string;
+        const vPlayerId = eventData.playerId as number | undefined;
+        if (vHeroId && vSkillName) {
+          VoiceManager.getInstance().playSkillVoice(vHeroId, vSkillName, vPlayerId);
+        }
+        break;
+      }
+      case 'CardVoicePlay': {
+        // PVP 出牌语音：服务端广播的出牌语音事件，本地播放
+        const cvGender = eventData.gender as string;
+        const cvCardName = eventData.cardName as string;
+        if (cvCardName) {
+          VoiceManager.getInstance().playCardVoice(cvGender, cvCardName);
+        }
+        break;
+      }
       case 'GameOver': {
         this.phaseEl.textContent = '游戏结束';
         this.renderBattlefield();
@@ -1382,13 +1560,65 @@ export class GamePage {
     }
   }
 
+  // ======================== PVP 操作读条倒计时 ========================
+
+  /** 需要显示倒计时的 PVP prompt 类型 */
+  private static readonly PVP_COUNTDOWN_PROMPT_TYPES = new Set([
+    'playCard', 'discard', 'target', 'response', 'nullify',
+    'showCard', 'yesNo', 'zone', 'ransackHand', 'discardMulti', 'selectCard',
+  ]);
+
+  /** 启动操作倒计时（PVE/PVP通用，默认15秒） */
+  public startPVPCountdown(durationSec: number = 15): void {
+    this.stopPVPCountdown();
+    this.pvpCountdownTotal = durationSec;
+    this.pvpCountdownRemaining = durationSec;
+    this.pvpCountdownBarEl.style.display = 'block';
+    this.updatePVPCountdownUI();
+
+    this.pvpCountdownTimer = setInterval(() => {
+      this.pvpCountdownRemaining--;
+      if (this.pvpCountdownRemaining <= 0) {
+        this.stopPVPCountdown();
+        return;
+      }
+      this.updatePVPCountdownUI();
+    }, 1000);
+  }
+
+  /** 更新倒计时UI */
+  private updatePVPCountdownUI(): void {
+    const pct = (this.pvpCountdownRemaining / this.pvpCountdownTotal) * 100;
+    this.pvpCountdownFillEl.style.width = `${pct}%`;
+    this.pvpCountdownTextEl.textContent = `${this.pvpCountdownRemaining}s`;
+
+    // 颜色分段：＞50% 绿色 / 25%-50% 橙色 / ＜25% 红色
+    this.pvpCountdownFillEl.classList.remove('safe', 'warning');
+    if (pct > 50) {
+      this.pvpCountdownFillEl.classList.add('safe');
+    } else if (pct > 25) {
+      this.pvpCountdownFillEl.classList.add('warning');
+    }
+  }
+
+  /** 停止操作倒计时并隐藏（PVE/PVP通用） */
+  public stopPVPCountdown(): void {
+    if (this.pvpCountdownTimer) {
+      clearInterval(this.pvpCountdownTimer);
+      this.pvpCountdownTimer = null;
+    }
+    this.pvpCountdownBarEl.style.display = 'none';
+    this.pvpCountdownRemaining = 0;
+  }
+
   /** PVP Prompt 处理：接收服务器prompt，调用 HumanWebUIDriver 展示UI，通过socket回应 */
   private handlePVPPrompt(promptData: any): void {
     const { requestId, type, data } = promptData;
     this.pvpRequestId = requestId;
 
-    // 设置 PVP 回应回调：点击 → socket.respond → 清空回调
+    // 设置 PVP 回应回调：点击 → socket.respond → 清空回调 → 停止倒计时
     this.humanDriver.setPVPRespond((result: any) => {
+      this.stopPVPCountdown();
       let serverResult = result;
       if (type === 'response' && result && typeof result === 'object' && result.name) {
         // 发送 { id, name, suit, number } 让服务器通过 id 匹配手牌中的对应 Card
@@ -1466,13 +1696,18 @@ export class GamePage {
           this.humanDriver.promptDiscardMulti(data.state, data.count, data.ctx);
           break;
         case 'selectCard':
-          this.humanDriver.promptSelectCard(data.state, data.title || '选择一张牌', data.ctx);
+          // filter 无法序列化，客户端无法验证；服务端 RemotePlayerDriver 会自行校验
+          this.humanDriver.promptSelectCard(data.state, data.title || '选择一张牌', undefined, data.ctx);
           break;
         default:
           console.warn(`[PVP] 未处理的 prompt 类型: ${type}`);
           socketManager.respond(requestId, null);
           this.humanDriver.setPVPRespond(null);
           this.pvpRequestId = null;
+      }
+      // 交互型 prompt：启动操作读条倒计时（10秒）
+      if (GamePage.PVP_COUNTDOWN_PROMPT_TYPES.has(type)) {
+        this.startPVPCountdown(15);
       }
     } catch (err) {
       console.error(`[PVP] prompt 处理错误:`, err);
@@ -1530,6 +1765,7 @@ export class GamePage {
     this.pvpUnsubs = [];
     this.humanDriver?.setPVPRespond(null);
     this.pvpRequestId = null;
+    this.stopPVPCountdown();
   }
 
   /** PVE闯关模式选将：支持动态人数+逐人选将+禁选池 */
@@ -1603,16 +1839,21 @@ export class GamePage {
       this.wallpaperLastMinute = -1;
       this.wallpaperCrossEl = this.el.querySelector('#game-bg-cross')! as HTMLElement;
       const bgEl = this.el.querySelector('#game-bg')! as HTMLElement;
-      const firstWallpaper = `Resources/Backgrounds/${this.wallpaperRegionBase}.png`;
+      // 初始化壁纸池并随机选首图（与PVP一致）
+      this.wallpaperPool = Array.from({ length: 10 }, (_, i) => this.wallpaperRegionBase + i);
+      const firstIdx = Math.floor(Math.random() * this.wallpaperPool.length);
+      const firstNum = this.wallpaperPool.splice(firstIdx, 1)[0];
+      const firstWallpaper = `Resources/Backgrounds/${firstNum}.png`;
       bgEl.style.backgroundImage = `url('${firstWallpaper}')`;
       this.wallpaperCrossEl.style.backgroundImage = `url('${firstWallpaper}')`;
       this.wallpaperCrossEl.style.opacity = '0';
-      this.wallpaperLastMinute = 0;
       const { peacetime, battle } = this.getBgmForRegion(chapter.region);
       this.bgmBattlePath = battle;
       if (this.bgmAudio) { this.bgmAudio.pause(); this.bgmAudio = null; }
       this.playPeacetimeBGM(peacetime, Date.now());
     }
+    // 确保 wallpaperLastMinute 在 timer 启动后首次 tick（minute=0）时不会触发覆盖
+    this.wallpaperLastMinute = 0;
 
     this.initGameCore();
     this.renderBattlefield();
@@ -1766,6 +2007,14 @@ export class GamePage {
     damageSystem.onTransmitChain = async (target, damage, sourceCard, source) => {
       cardEffectManager.transmitChainedDamage(target, damage, sourceCard, source, false);
     };
+    // 娜维娅-刺玫：受到的伤害恒为1
+    damageSystem.naviaRoseHandler = (target, damageRef) => {
+      const oldVal = damageRef.value;
+      this.skillManager.naviaRoseDamageLimit(damageRef);
+      if (damageRef.value < oldVal) {
+        this.eventBus.emit(GameEvent.Log, { message: `【刺玫】${target.name} 受到的伤害恒为1！` });
+      }
+    };
     damageSystem.equipBeforeDamageHandler = (target, damage, sourceCard) => {
       equipManager.handleArmorBeforeDamage(target, damage, sourceCard);
     };
@@ -1796,6 +2045,9 @@ export class GamePage {
     if (this.flowController) {
       this.flowController.skillManager = this.skillManager as any;
     }
+
+    // 注册技能动画监听
+    this.setupVoiceAnimationListener();
 
     // 设置技能点击回调
     this.onSkillClick = async (skillId: string) => {
@@ -1876,6 +2128,12 @@ export class GamePage {
   /** 注册 EventBus 事件监听器（UI 渲染 & 动画，PVE/PVP 共用路径） */
   private registerUIEventListeners(): void {
     this.eventBus.on(GameEvent.Log, (e) => {
+      // 支持 visibleTo 过滤：仅指定的玩家可见（凝光天权等技能播报）
+      const visibleTo = e.data.visibleTo as number[] | undefined;
+      if (visibleTo) {
+        const selfId = this.getHumanPlayer()?.id;
+        if (selfId === undefined || !visibleTo.includes(selfId)) return;
+      }
       this.addLog(e.data.message as string);
     });
     this.eventBus.on(GameEvent.TurnStarted, (e) => {
@@ -1941,6 +2199,8 @@ export class GamePage {
       const card = e.data.card as Card;
       if (playerId !== undefined && playerId !== this.selfId && card) {
         this.animateCardPlayed(playerId, card.name, card.suit, card.number);
+        // 标记此牌已播放打出动画，避免后续 sendToDiscard 再次触发动画
+        this._playedCardIds.add(card.id);
       }
     });
     this.eventBus.on(GameEvent.CardDrawn, (e) => {
@@ -1958,17 +2218,22 @@ export class GamePage {
       if (this.deck) this.deckCountEl.textContent = String(this.deck.drawPileCount);
       this.renderBattlefield();
       this.renderHandCards();
-      // 弃牌动画：只有自己弃牌时显示弃牌动画，其他玩家使用座位飞出动画
-      const playerId = e.data.playerId as number;
+      // 弃牌动画：跳过已在 CardPlayed 中播放过动画的牌（避免双重动画）
       const card = e.data.card as Card | undefined;
+      const cid = card?.id;
+      if (cid !== undefined && this._playedCardIds.has(cid)) {
+        this._playedCardIds.delete(cid);
+        return;
+      }
+      const playerId = e.data.playerId as number | undefined;
       const cardName = (e.data.cardName as string) || card?.name;
       const suit = (e.data.suit as string) || card?.suit;
       const number = (e.data.number as number) ?? card?.number;
-      if (cardName && playerId !== undefined) {
-        if (playerId === this.selfId) {
-          this.animateDiscard(cardName, suit, number);
-        } else {
+      if (cardName) {
+        if (playerId !== undefined && playerId !== this.selfId) {
           this.animateCardPlayed(playerId, cardName, suit, number);
+        } else {
+          this.animateDiscard(cardName, suit, number);
         }
       }
     });
@@ -2040,8 +2305,15 @@ export class GamePage {
 
       if (this.flowController) {
         const expData = this.computeLocalPVPExp(winner);
-        // PVE 模式：不进行经验上报，直接显示结算
+        // PVE 模式：本地保存经验并更新 account，确保 HomePage 实时读取
         if (this.pveLevel) {
+          const me = this.getHumanPlayer();
+          if (me) {
+            const myExp = expData.expByPlayerId[me.id];
+            if (myExp && myExp.totalExp > 0) {
+              this.applyLocalExpFallback(myExp);
+            }
+          }
           setTimeout(() => this.showResultModal(winner, expData), 500);
         } else {
           const me = this.getHumanPlayer();
@@ -2642,6 +2914,10 @@ export class GamePage {
   }
 
   private canPlayCard(card: Card, state: PlayerState, ctx: GameContextSnapshot): boolean {
+    // 魈-降魔：封印花色不可打出（PVE查skillManager，PVP查_sealedSuits）
+    if (this.skillManager?.isSuitSealed?.(card.suit)) return false;
+    const pSealed = (state as any)._sealedSuits as Record<string, boolean> | undefined;
+    if (pSealed && pSealed[card.suit]) return false;
     if (card.type === 'Equipment') return true;
     if (card.name === '桃') return state.hp < state.maxHp;
     if (card.name === '无中生有') return true;
@@ -2664,6 +2940,10 @@ export class GamePage {
         !p.isDead && p.equipZone[EquipmentType.Weapon] !== null
       );
       return weaponHolders.length > 0;
+    }
+    // 克洛琳德-决斗：高点数手牌当决斗打出
+    if (this.skillManager?.getClorindeDuelConvert?.(state, card)) {
+      return true; // 可以当决斗打出
     }
     // 默认：锦囊都可以尝试打出
     return card.type === 'Magic';
@@ -3006,8 +3286,6 @@ export class GamePage {
     } else {
       // 显示"放弃打出"红色按钮
       this.showNullifyPassButton();
-
-      // 不再注册点击空白区域自动放弃的全局监听器，只保留"放弃打出"按钮和超时
     }
   }
 
@@ -3019,12 +3297,15 @@ export class GamePage {
 
   private nullifyPassBar: HTMLElement | null = null;
 
+  /** 已播放打出动画的卡牌ID集合——避免 CardDiscarded 再次触发相同动画 */
+  private _playedCardIds: Set<number> = new Set();
+
   private showNullifyPassButton(): void {
     this.hideNullifyPassButton();
     const bar = document.createElement('div');
     bar.className = 'nullify-pass-bar';
     bar.id = 'nullify-pass-bar';
-    bar.innerHTML = `<button class="btn-nullify-pass" id="nullify-pass-btn">放弃打出【无懈可击】</button>`;
+    bar.innerHTML = `<button class="btn-nullify-pass" id="nullify-pass-btn">放弃打出【无懈可击】（5秒后自动跳过）</button>`;
     bar.querySelector('#nullify-pass-btn')!.addEventListener('click', (e) => {
       e.stopPropagation();
       this.clearHighlights();
@@ -3203,8 +3484,8 @@ export class GamePage {
       <div class="game-modal">
         <h3>${title}</h3>
         <div style="display:flex;gap:12px;justify-content:center;margin-top:16px;">
-          <button class="btn btn-gold btn-sm" id="yn-yes">发动</button>
-          <button class="btn btn-ghost btn-sm" id="yn-no">不发动</button>
+          <button class="btn btn-gold btn-sm" id="yn-yes">确定</button>
+          <button class="btn btn-ghost btn-sm" id="yn-no">取消</button>
         </div>
       </div>
     `;
@@ -3755,7 +4036,7 @@ export class GamePage {
     // 标题
     const title = document.createElement('div');
     title.className = 'grace-nullify-title';
-    title.textContent = '是否使用【无懈可击】？';
+    title.textContent = '是否使用【无懈可击】？（5秒后自动跳过）';
     section.appendChild(title);
 
     // 卡牌容器
@@ -3788,13 +4069,13 @@ export class GamePage {
 
     modal.appendChild(section);
 
-    // 8秒超时自动跳过
+    // 5秒超时自动跳过
     setTimeout(() => {
       if (this.graceOverlay?.querySelector('#grace-nullify-section')) {
         this.humanDriver.resolveNullify(false);
         this.removeGraceNullifySection();
       }
-    }, 8000);
+    }, 5000);
   }
 
   private removeGraceNullifySection(): void {
@@ -4025,8 +4306,11 @@ export class GamePage {
               <span class="seat-info-label">⚔</span>
               <span class="seat-info-value">${equipHtml || '无'}</span>
             </div>
+            ${statusMarks ? `<div class="seat-info-row seat-status-row">
+              <span class="seat-info-label">🏷</span>
+              <span class="seat-info-value"><span class="seat-status-marks">${statusMarks}</span></span>
+            </div>` : ''}
           </div>
-          ${statusMarks}
           ${judgeInfo}
         </div>
       </div>
@@ -4038,23 +4322,26 @@ export class GamePage {
     if (!this.skillManager) return '';
     const marks: string[] = [];
 
-    // 从skillManager获取玩家数据
-    // 通过 (skillManager as any) 访问内部数据
+    // 从skillManager获取玩家数据（PVE），或从序列化的 _xxx 字段读取（PVP）
     const data = (this.skillManager as any).getData?.(player.id) || {};
+    const pAny = player as any;
 
     // 玉璋标记
-    if (data.jadeCount > 0) {
-      marks.push(`<span class="status-mark jade" title="玉璋标记">🛡${data.jadeCount}</span>`);
+    const jadeCount = data.jadeCount || pAny._jadeCount || 0;
+    if (jadeCount > 0) {
+      marks.push(`<span class="status-mark jade" title="玉璋标记">🛡${jadeCount}</span>`);
     }
 
     // 无想标记（雷电将军）
-    if (data.musouCount > 0) {
-      marks.push(`<span class="status-mark musou" title="无想标记">⚡${data.musouCount}</span>`);
+    const musouCount = data.musouCount || pAny._musouCount || 0;
+    if (musouCount > 0) {
+      marks.push(`<span class="status-mark musou" title="无想标记">⚡${musouCount}</span>`);
     }
 
     // 空月标记（哥伦比娅-少女）
-    if (data.emptyMoonCount > 0) {
-      marks.push(`<span class="status-mark moon" title="空月标记">🌙${data.emptyMoonCount}</span>`);
+    const emptyMoonCount = data.emptyMoonCount || pAny._emptyMoonCount || 0;
+    if (emptyMoonCount > 0) {
+      marks.push(`<span class="status-mark moon" title="空月标记">🌙${emptyMoonCount}</span>`);
     }
 
     // 霜月标记（哥伦比娅-月神）
@@ -4097,9 +4384,10 @@ export class GamePage {
       marks.push(`<span class="status-mark maple" title="枫">🍁${data.mapleLeaves.length}</span>`);
     }
 
-    // 魈-封印花色
-    if (data.sealedSuits) {
-      const sealed = Object.keys(data.sealedSuits).filter(k => data.sealedSuits[k]);
+    // 魈-封印花色（PVP回退读_sealedSuits）
+    const sealedSuits = data.sealedSuits || (pAny._sealedSuits as Record<string, boolean> | null);
+    if (sealedSuits) {
+      const sealed = Object.keys(sealedSuits).filter(k => sealedSuits[k]);
       if (sealed.length > 0) {
         const suitIcons: Record<string, string> = { Spade: '♠', Heart: '♥', Club: '♣', Diamond: '♦' };
         const icons = sealed.map(s => suitIcons[s] || s).join('');
@@ -4130,9 +4418,14 @@ export class GamePage {
       }
     }
 
+    // 申鹤-冰翎标记（受击方需要2张闪才能抵消杀）
+    if (data.iceFeatherCount > 0) {
+      marks.push(`<span class="status-mark feather" title="冰翎标记（需2张闪抵消杀）">🪶${data.iceFeatherCount}</span>`);
+    }
+
     if (marks.length === 0) return '';
 
-    return `<div class="seat-status-marks">${marks.join('')}</div>`;
+    return marks.join('');
   }
 
   private suitDetail(c: Card): string {
@@ -4277,9 +4570,16 @@ export class GamePage {
 
   /** 莉奈娅-谶鸟：在手牌区最右边显示牌堆顶牌（仅可见，不可打出） */
   private appendLyneyaTopCard(parent: HTMLElement, me: PlayerState): void {
-    if (!this.skillManager || me.heroId !== 'lyneya') return;
-    const topCard = (this.skillManager as any).getLyneyaTopCard?.(me);
+    if (me.heroId !== 'lyneya') return;
+    // 优先使用 GamePage 的 skillManager，如果没有则尝试 flowController 的
+    const sm = this.skillManager || (this.flowController as any)?.skillManager;
+    if (!sm) return;
+    const topCard = (sm as any).getLyneyaTopCard?.(me);
     if (!topCard) return;
+
+    // 取出已有的谶鸟牌，避免重复添加
+    const existing = parent.querySelector('.omen-card');
+    if (existing) existing.remove();
 
     const cardEl = document.createElement('div');
     cardEl.className = 'game-card omen-card';
@@ -4371,9 +4671,35 @@ export class GamePage {
     };
 
     // 通过skillManager获取技能可用性（如果已初始化）
-    const skillInfos = this.skillManager?.getSkills(me, ctx) || hero.skills.map(s => ({
-      id: `${me.heroId}_${s.name}`, name: s.name, description: s.desc, type: 'passive' as const, usable: () => false,
-    }));
+    const sm = this.skillManager || (this.flowController as any)?.skillManager;
+    const skillInfos = sm?.getSkills(me, ctx) || hero.skills.map(s => {
+      // PVP模式或无skillManager时，根据hero数据构建技能信息
+      // type从SkillManager的注册反查，fallback中使用hero.skills的name匹配常用类型
+      const knownTypes: Record<string, string> = {
+        '自由': 'active', '高天': 'trigger', '吟游': 'active',
+        '契约': 'trigger', '玉璋': 'passive', '闲游': 'active',
+        '永恒': 'passive', '御决': 'active', '无想': 'trigger',
+        '幻梦': 'trigger', '智慧': 'passive', '比喻': 'active', '囚笼': 'trigger',
+        '歌颂': 'trigger', '罪舞': 'trigger', '独舞': 'active',
+        '战争': 'passive', '圣火': 'active', '领袖': 'trigger',
+        '少女': 'trigger', '月神': 'trigger',
+        '天权': 'active', '回火': 'active', '代理': 'active', '炸鱼': 'active',
+        '知论': 'active', '庇笛': 'active', '狐魅': 'active', '军师': 'active',
+        '佣兵': 'active', '红枫': 'active', '赤鬼': 'active', '工匠': 'active',
+        '祝福': 'active', '超越': 'active', '调停': 'active', '北风': 'active',
+        '远征': 'active', '写信': 'active', '破镜': 'active', '炼金': 'active',
+      };
+      const skillType = knownTypes[s.name] || 'trigger';
+      return {
+        id: `${me.heroId}_${s.name}`, name: s.name, description: s.desc,
+        type: skillType,
+        usable: (p: any, c: any) => {
+          // PVP/无SkillManager时：当前是玩家回合且技能是active类型即可用
+          if (skillType === 'active' && c && p.id === c.currentPlayerId) return true;
+          return false;
+        },
+      };
+    });
 
     // 底部右侧技能区：显示所有技能（主动可点击，被动/触发/限定显示标签）
     if (this.skillAreaEl) {
@@ -4547,47 +4873,30 @@ export class GamePage {
     return bonus;
   }
 
-  /** 本地经验兜底保存（服务器不可用或未登录时使用 localStorage） */
+  /** 经验值上报到服务端 */
   private applyLocalExpFallback(myExp: { baseExp: number; bonusExp: number; totalExp: number; oldLevel: number; newLevel: number; leveledUp: boolean; escaped: boolean }): void {
-    try {
-      const LOCAL_EXP_KEY = 'genshin_card_local_exp';
-      let stored: { totalExp: number; level: number } = { totalExp: 0, level: 1 };
-      const raw = localStorage.getItem(LOCAL_EXP_KEY);
-      if (raw) {
-        try { stored = JSON.parse(raw); } catch (_) { /* ignore */ }
-      }
-      const oldLevel = stored.level;
-      stored.totalExp += myExp.totalExp;
-      // 简化等级计算：1-55级每级100，之后指数增长
-      let newLevel = 1;
-      let cumulative = 0;
-      for (let lv = 1; lv < 60; lv++) {
-        const need = lv <= 55 ? lv * 100 : 56000 + (lv - 56) * 1000;
-        cumulative += need;
-        if (stored.totalExp >= cumulative) newLevel = lv + 1;
-        else break;
-      }
-      newLevel = Math.min(60, newLevel);
-      stored.level = newLevel;
-      localStorage.setItem(LOCAL_EXP_KEY, JSON.stringify(stored));
-      myExp.oldLevel = oldLevel;
-      myExp.newLevel = newLevel;
-      myExp.leveledUp = newLevel > oldLevel;
-      // 尝试在下次连接服务器时同步
-      if (socketManager.isConnected) {
-        socketManager.emitWithAck('add_exp', { totalExp: myExp.totalExp }).then((ack: any) => {
-          if (ack?.success) {
-            myExp.oldLevel = ack.oldLevel;
-            myExp.newLevel = ack.newLevel;
-            myExp.leveledUp = ack.leveledUp;
-            // 同步成功后清除本地记录
-            localStorage.removeItem(LOCAL_EXP_KEY);
-          }
-        }).catch(() => {});
-      }
-    } catch (_) {
-      // localStorage 不可用，静默失败
+    if (socketManager.isConnected) {
+      socketManager.emitWithAck('add_exp', { totalExp: myExp.totalExp }).then((ack: any) => {
+        if (ack?.success) {
+          myExp.oldLevel = ack.oldLevel;
+          myExp.newLevel = ack.newLevel;
+          myExp.leveledUp = ack.leveledUp;
+        }
+      }).catch(() => {});
     }
+  }
+
+  /** 从累计经验计算等级 */
+  private calcLevelFromTotalExp(totalExp: number): number {
+    let level = 1;
+    let cumulative = 0;
+    for (let lv = 1; lv < 60; lv++) {
+      const need = lv <= 55 ? lv * 100 : 56000 + (lv - 56) * 1000;
+      cumulative += need;
+      if (totalExp >= cumulative) level = lv + 1;
+      else break;
+    }
+    return Math.min(60, level);
   }
 
   /** PVE 闯关：计算星级并保存 */
@@ -4621,7 +4930,7 @@ export class GamePage {
                        winner.includes('内奸') ? 'Traitor' :
                        winner.includes('主公') || winner.includes('忠臣') ? 'MonarchMinister' : '';
 
-    // 阵营排序权重：主→忠→反→内（按用户要求顺序）
+    // 阵营排序权重：主→忠→反→内（同阵营主公在忠臣前面）
     const roleOrder: Record<string, number> = { Monarch: 0, Minister: 1, Rebel: 2, Traitor: 3 };
 
     // 判断玩家是否属于胜利方
@@ -4632,15 +4941,16 @@ export class GamePage {
       return !p.isDead;
     };
 
-    // 排序：胜利方优先 → 同阵营按经验降序
+    // 排序：胜利方优先 → 同阵营主忠按角色序（主→忠）→ 再按经验降序
     const sorted = [...this.players].sort((a, b) => {
       const aWin = isWinner(a) ? 0 : 1;
       const bWin = isWinner(b) ? 0 : 1;
       if (aWin !== bWin) return aWin - bWin;
-      // 同胜利方：先按角色排序（主→忠→反→内）
-      const roleDiff = (roleOrder[a.role] || 9) - (roleOrder[b.role] || 9);
-      if (roleDiff !== 0) return roleDiff;
-      // 同阵营按经验降序
+      // 同胜负组：先按大阵营（主忠→反贼→内奸），再同身份按经验降序
+      const aRoleOrd = roleOrder[a.role] ?? 9;
+      const bRoleOrd = roleOrder[b.role] ?? 9;
+      if (aRoleOrd !== bRoleOrd) return aRoleOrd - bRoleOrd;
+      // 同角色按经验降序
       const aExp = expByPid[a.id]?.totalExp ?? 0;
       const bExp = expByPid[b.id]?.totalExp ?? 0;
       return bExp - aExp;
@@ -4653,9 +4963,14 @@ export class GamePage {
     // PVE星星标题
     let starTitle = '';
     if (isPVE) {
-      const records = getPVEStarRecords();
-      const stars = records[this.levelId] || 0;
-      starTitle = `<div class="result-winner" style="font-size:24px;">${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)} ${stars === 3 ? '三星通关！' : stars === 2 ? '二星通关' : '一星通关'}</div>`;
+      const pveWin = winner === '友方阵营';
+      if (pveWin) {
+        const records = getPVEStarRecords();
+        const stars = records[this.levelId] || 0;
+        starTitle = `<div class="result-winner" style="font-size:24px;">${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)} ${stars === 3 ? '三星通关！' : stars === 2 ? '二星通关' : '一星通关'}</div>`;
+      } else {
+        starTitle = `<div class="result-winner" style="font-size:24px;color:#f44336;">💀 挑战失败</div>`;
+      }
     }
 
     overlay.innerHTML = `
@@ -4674,7 +4989,8 @@ export class GamePage {
               const hero = getHeroById(p.heroId);
               const roleName = isPVE ? ((p as any).faction === 'Ally' ? '友方' : (p as any).faction === 'Enemy' ? '敌方' : '—') : getRoleChineseName(p.role);
               const escaped = escapedPlayerIds.has(p.id);
-              const status = escaped ? '🏳️ 逃跑' : (p.isDead ? '💀 阵亡' : '✅ 存活');
+              const playerWin = isWinner(p);
+              const status = escaped ? '🏳️ 逃跑' : (p.isDead ? '💀 阵亡' : (playerWin ? '✅ 胜利' : '✅ 存活'));
               const isHuman = p.id === this.humanPlayerIdx;
               const factionTag = (p as any).faction;
               const rowClass = isPVE ? (factionTag === 'Ally' ? 'winner-row' : 'loser-row') : (escaped ? 'escaped-row' : (isWinner(p) ? 'winner-row' : 'loser-row'));
@@ -4714,12 +5030,64 @@ export class GamePage {
     document.body.appendChild(overlay);
   }
 
+  // ======================== 技能动画 ========================
+
+  private voiceAnimListener: ((e: Event) => void) | null = null;
+
+  private setupVoiceAnimationListener(): void {
+    if (this.voiceAnimListener) return;
+    this.voiceAnimListener = (e: Event) => {
+      const detail = (e as CustomEvent<VoicePlayEventDetail>).detail;
+      this.showSkillFloatAnimation(detail.playerId, detail.skillName);
+    };
+    document.addEventListener(VOICE_PLAY_EVENT, this.voiceAnimListener);
+  }
+
+  private cleanupVoiceAnimationListener(): void {
+    if (this.voiceAnimListener) {
+      document.removeEventListener(VOICE_PLAY_EVENT, this.voiceAnimListener);
+      this.voiceAnimListener = null;
+    }
+  }
+
+  /** 在指定玩家席位上方显示技能名浮空动画 */
+  private showSkillFloatAnimation(playerId: number, skillName: string): void {
+    const seatEl = this.getSeatElement(playerId);
+    if (!seatEl) return;
+
+    const rect = seatEl.getBoundingClientRect();
+    // 获取席位在战场中的相对位置
+    const battlefieldRect = this.el.querySelector('#battlefield')?.getBoundingClientRect();
+    if (!battlefieldRect) return;
+
+    const floatText = document.createElement('div');
+    floatText.className = 'skill-float-text';
+    floatText.textContent = skillName;
+
+    // 定位在席位上方中央（贴近角色头像）
+    const left = rect.left + rect.width / 2;
+    const top = rect.top - 15;
+
+    floatText.style.position = 'fixed';
+    floatText.style.left = left + 'px';
+    floatText.style.top = top + 'px';
+    floatText.style.transform = 'translateX(-50%)';
+
+    document.body.appendChild(floatText);
+
+    // 动画结束后自动清理
+    floatText.addEventListener('animationend', () => {
+      floatText.remove();
+    });
+  }
+
   private cleanupGame(): void {
     // 中止游戏循环
     this.flowController?.abort();
     this.eventBus?.clear();
     this.stopBGM();
     this.stopTimer();
+    this.cleanupVoiceAnimationListener();
     this.gameStarted = false;
     this.isGameOver = true;
     // 清理选将倒计时
@@ -4730,9 +5098,19 @@ export class GamePage {
     // PVP 清理
     this.cleanupPVPListeners();
     this.pvpOnline = false;
-    // 重置壁纸序列，确保下局游戏重新随机 Fisher-Yates 洗牌
-    this.wallpaperShuffle = [];
-    this.wallpaperShuffleIdx = 0;
+    // 重置壁纸池，确保下局游戏重新随机
+    this.wallpaperPool = [];
+    // 彻底清除游戏对象引用，防止下局数据残留
+    this.flowController = null as any;
+    this.skillManager = null as any;
+    this.players = [];
+    this.deck = null as any;
+    this.eventBus = null as any;
+    this.humanDriver = null as any;
+    this.pvpRequestId = null;
+    // 注意：不要在这里 emit leave_room！
+    // cleanupGame 在 onEnter 时也会被调用，leave_room 会把玩家踢出刚进入的房间
+    // leave_room 应只在主动退出时发送（handlePVPGameOver 中处理）
   }
 
   show(): void { this.el.classList.add('active'); }

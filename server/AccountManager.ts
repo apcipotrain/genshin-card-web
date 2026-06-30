@@ -121,8 +121,11 @@ export class AccountManager {
     return crypto.randomBytes(32).toString('hex');
   }
 
-  private sanitize(acc: Account): Omit<Account, 'passwordHash'> {
-    return { id: acc.id, name: acc.name, nickname: acc.nickname, avatar: acc.avatar, level: acc.level ?? 1, exp: acc.exp ?? 0, createdAt: acc.createdAt };
+  private sanitize(acc: Account): Omit<Account, 'passwordHash'> & { pveStars?: Record<number, number>; settings?: Record<string, any> } {
+    const { passwordHash, ...rest } = acc as any;
+    if (rest.level === undefined) rest.level = 1;
+    if (rest.exp === undefined) rest.exp = 0;
+    return rest;
   }
 
   signup(name: string, password: string): LoginResult {
@@ -212,6 +215,24 @@ export class AccountManager {
     this.saveToFile();
     console.log(`[AccountManager] addExp OK: ${account.name} Lv${oldLevel}→${account.level} exp=${account.exp}`);
     return { oldLevel, newLevel: account.level, totalExp: account.exp, leveledUp: account.level > oldLevel };
+  }
+
+  /** 保存 PVE 关卡星级 */
+  savePVEStars(token: string, stars: Record<number, number>): boolean {
+    const account = this.getAccountByToken(token);
+    if (!account) return false;
+    (account as any).pveStars = stars;
+    this.saveToFile();
+    return true;
+  }
+
+  /** 保存用户设置 */
+  saveSettings(token: string, settings: Record<string, any>): boolean {
+    const account = this.getAccountByToken(token);
+    if (!account) return false;
+    (account as any).settings = { ...((account as any).settings || {}), ...settings };
+    this.saveToFile();
+    return true;
   }
 
   /** 通过 accountId 直接增加经验（服务端结算专用，绕过 tokens map 过期问题） */

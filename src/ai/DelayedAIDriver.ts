@@ -97,6 +97,16 @@ export class DelayedAIDriver {
     await this.delay();
     return this.ai.promptYesNo(question);
   }
+  promptActiveSkill(state: PlayerState, availableSkills: { id: string; name: string; description: string }[], ctx: GameContextSnapshot): string | null {
+    // 同步调用，不需要delay（与其他AI方法不同，这是内部决策逻辑）
+    return this.ai.promptActiveSkill(state, availableSkills, ctx);
+  }
+  getNextBestCardIndex(state: PlayerState, ctx: GameContextSnapshot, excludeIds: Set<number>): number {
+    return this.ai.getNextBestCardIndex(state, ctx, excludeIds);
+  }
+  isEnemy(me: PlayerState, other: PlayerState): boolean {
+    return this.ai.isEnemy(me, other);
+  }
   async promptRansackHand(state: PlayerState, targetId: number, ctx: GameContextSnapshot): Promise<number> {
     await this.delay();
     return (this.ai as any).promptRansackHand?.(state, targetId, ctx) ?? -1;

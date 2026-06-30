@@ -98,10 +98,12 @@ export class DeckManager {
   /** 卡牌进入弃牌堆（全场唯一入口，拒绝虚拟牌） */
   sendToDiscard(card: Card): void {
     if (!card || card.isVirtual) return;
+    const sourcePlayerId = (card.cardSource as any)?.id ?? undefined;
     card.cardSource = null;
     this.discardPile.push(card);
     this.eventBus.emit(GameEvent.CardDiscarded, {
       card: { ...card },
+      playerId: sourcePlayerId,
       discardPileCount: this.discardPile.length
     });
   }

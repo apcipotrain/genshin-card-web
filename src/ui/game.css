@@ -84,6 +84,42 @@
   100% { transform: scale(1); }
 }
 
+/* ========== PVP 操作读条倒计时 ========== */
+.pvp-countdown-bar {
+  position: relative;
+  width: 160px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.pvp-countdown-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 100%;
+  border-radius: 4px;
+  transition: width 1.0s linear;
+  background: linear-gradient(90deg, #ff4444, #ff6b6b);
+}
+.pvp-countdown-fill.warning {
+  background: linear-gradient(90deg, #ff8800, #ffaa00);
+}
+.pvp-countdown-fill.safe {
+  background: linear-gradient(90deg, #44c767, #66e088);
+}
+.pvp-countdown-text {
+  position: absolute;
+  right: -36px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 /* ========== 战场布局 ========== */
 .battlefield {
   flex: 1;
@@ -335,11 +371,10 @@
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
-  margin-top: 4px;
-  padding: 4px 6px;
-  background: rgba(0, 0, 0, 0.25);
+  margin-top: 0;
+  padding: 0 2px;
+  background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 .status-mark {
   display: inline-flex;
@@ -413,6 +448,12 @@
 .seat-equip-row .seat-info-value {
   font-size: 9px;
   color: var(--gold-dim);
+}
+.seat-status-row .seat-info-label {
+  flex-shrink: 0;
+}
+.seat-status-row .seat-info-value {
+  font-size: 9px;
 }
 
 /* 区域选择器 */
@@ -2019,4 +2060,43 @@
 }
 .hero-info-skill strong {
   color: var(--gold);
+}
+
+/* ========== 技能名浮空动画 ========== */
+.skill-float-text {
+  position: absolute;
+  pointer-events: none;
+  z-index: 200;
+  color: var(--gold);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-shadow:
+    0 0 10px rgba(255, 200, 0, 0.9),
+    0 0 20px rgba(255, 200, 0, 0.5),
+    0 2px 4px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  animation: skillFloatUp 1.6s ease-out forwards;
+  user-select: none;
+}
+
+@keyframes skillFloatUp {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.8);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0) scale(1.05);
+  }
+  25% {
+    transform: translateY(-4px) scale(1);
+  }
+  60% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-60px) scale(1.2);
+  }
 }

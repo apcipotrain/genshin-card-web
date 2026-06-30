@@ -66,18 +66,22 @@ export class EquipEffectManager {
 
   // ======================== 防具：响应前 ========================
 
-  handleArmorOnResponse(
+  async handleArmorOnResponse(
     target: PlayerState,
     requiredCardName: string,
     sourceCard: Card | null,
     source: PlayerState | null
-  ): boolean {
+  ): Promise<boolean> {
     const armor = target.equipZone[EquipmentType.Armor];
     if (!armor) return false;
 
-    // 八卦阵：被索要闪时可判定
+    // 八卦阵：被索要闪时可判定（玩家主动选择发动）
     if (armor.name === '八卦阵' && requiredCardName === '闪') {
-      // 同步简化：八卦阵自动发动（AI和玩家都发动）
+      const driver = this.drivers.get(target.id);
+      if (driver) {
+        const shouldActivate = await (driver as any).promptYesNo?.('是否发动【八卦阵】？');
+        if (!shouldActivate) return false;
+      }
       const judgeCard = this.deck.dealOneCard();
       if (!judgeCard) return false;
 
@@ -160,6 +164,17 @@ export class EquipEffectManager {
       this.eventBus.emit(GameEvent.Log, { message: `【白银狮子】将 ${damageRef.value} 点伤害限制为 1 点！` });
       damageRef.value = 1;
     }
+
+    // 炼金防具（阿贝多）：伤害-1
+    if ((armor as any)._albedoAlchemy && damageRef.value > 0) {
+      damageRef.value = Math.max(0, damageRef.value - 1);
+      this.eventBus.emit(GameEvent.Log, { message: `【炼金防具】减免1点伤害！剩余 ${damageRef.value} 点。` });
+      if (damageRef.value <= 0) {
+        this.deck.sendToDiscard(armor);
+        target.equipZone[EquipmentType.Armor] = null;
+        this.eventBus.emit(GameEvent.Log, { message: '【炼金防具】被击碎！' });
+      }
+    }
   }
 
   // ======================== 防具：离场 ========================
@@ -182,11 +197,17 @@ export class EquipEffectManager {
 
   // ======================== 武器：朱雀羽扇 ========================
 
-  modifySlashElementBeforeProcess(source: PlayerState, slashCard: Card): void {
+  async modifySlashElementBeforeProcess(source: PlayerState, slashCard: Card): Promise<void> {
     const weapon = source.equipZone[EquipmentType.Weapon];
     if (weapon?.name === '朱雀羽扇' && slashCard.element === ElementType.None) {
-      this.eventBus.emit(GameEvent.WeaponEffect, { name: '朱雀羽扇', playerId: source.id });
-      slashCard.element = ElementType.Pyro;
+      const driver = this.drivers.get(source.id);
+      if (driver) {
+        const convert = await (driver as any).promptYesNo?.('是否发动【朱雀羽扇】将普通【杀】转为【火杀】？');
+        if (convert) {
+          this.eventBus.emit(GameEvent.WeaponEffect, { name: '朱雀羽扇', playerId: source.id });
+          slashCard.element = ElementType.Pyro;
+        }
+      }
     }
   }
 
@@ -194,7 +215,7 @@ export class EquipEffectManager {
 
   shouldIgnoreArmor(source: PlayerState): boolean {
     const weapon = source.equipZone[EquipmentType.Weapon];
-    return weapon?.name === '青釭剑';
+    return weapon?.name === '青缸剑';
   }
 
   // ======================== 武器：雌雄双股剑 ========================
@@ -263,13 +284,18 @@ export class EquipEffectManager {
         const driver = this.drivers.get(source.id)!;
         const useIt = await driver.promptWeaponEffect(source, '青龙偃月刀', this.buildContext(source.id));
         if (useIt) {
-          // 让玩家选择一张杀来追击（AI自动选第一张；人类玩家通过UI选择）
+          // 让玩家选择一张杀来追击（AI自动选第一张）
           const ctx = this.buildContext(source.id);
           const slashIdx = (driver as any).promptSelectCard
-            ? await (driver as any).promptSelectCard(source, slashesInHand, ctx)
+            ? await (driver as any).promptSelectCard(source,
+                '青龙偃月刀-选择一张【杀】追加追击',
+                (c: Card) => isSlash(c),
+                ctx)
             : 0;
-          if (slashIdx < 0 || slashIdx >= slashesInHand.length) return false;
-          const nextSlash = slashesInHand[slashIdx];
+          if (slashIdx < 0) return false;
+          // promptSelectCard 返回的是 handCards 索引，需要取对应牌
+          const nextSlash = source.handCards[slashIdx];
+          if (!nextSlash || !isSlash(nextSlash)) return false;
           const handIdx = source.handCards.indexOf(nextSlash);
           source.handCards.splice(handIdx, 1);
           this.deck.sendToDiscard(nextSlash);

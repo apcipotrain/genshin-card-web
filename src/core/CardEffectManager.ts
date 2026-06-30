@@ -14,6 +14,7 @@ import { DeckManager } from './DeckManager';
 import { EventBus } from './EventBus';
 import { DamageSystem } from './DamageSystem';
 import { EquipEffectManager } from './EquipEffectManager';
+import { VoiceManager } from '../audio/VoiceManager';
 
 export class CardEffectManager {
   private deck: DeckManager;
@@ -29,11 +30,12 @@ export class CardEffectManager {
   // SkillManager 注入
   public skillManager: {
     onMagicUsed: (player: PlayerState, card: Card) => Promise<boolean>;
-    onMagicTargeted: (player: PlayerState, card: Card) => { intercepted: boolean; data?: any };
+    onMagicTargeted: (player: PlayerState, card: Card) => Promise<{ intercepted: boolean; data?: any }>;
     onBeforeSlashTarget: (target: PlayerState, source: PlayerState) => { intercepted: boolean; data?: any };
     canDelayKitAffect: (player: PlayerState, kitName: string) => boolean;
     isSuitSealed: (suit: string) => boolean;
-    onDealingDamage: (source: PlayerState, target: PlayerState, damage: number) => Promise<{ intercepted: boolean; data?: any }>;
+    onDealingDamage: (source: PlayerState, target: PlayerState, damage: number, sourceCard?: Card | null) => Promise<{ intercepted: boolean; data?: any }>;
+    onAfterCardPlay: (player: PlayerState, card?: Card) => Promise<void>;
     getFireDamageBonus: (source: PlayerState) => number;
     isAlhaithamMagicImmune: (source: PlayerState) => boolean;
     hasAlhaithamKnowledge: (player: PlayerState) => boolean;
@@ -49,6 +51,7 @@ export class CardEffectManager {
     getEulaDistanceReduction: (source: PlayerState, target: PlayerState) => number;
     getNilouStanceConvert: (player: PlayerState, card: Card) => string | null;
     isXiaoGoldenwingActive: (target: PlayerState) => boolean;
+    onXiaoGoldenwingSlash: (target: PlayerState, source: PlayerState, slashCard: Card) => Promise<{ intercepted: boolean; data?: any }>;
     isKinichPriceActive: (target: PlayerState) => boolean;
     onKinichPriceSlash: (target: PlayerState, source: PlayerState, slashCard: Card) => Promise<{ intercepted: boolean; data?: any }>;
     onDoubleNullify: (magicCard: Card, target: PlayerState) => Promise<boolean>;
@@ -69,6 +72,8 @@ export class CardEffectManager {
     applyFrostMark: (target: PlayerState, sourceName: string, skillName: string) => void;
     isGanyuKylinActive: (source: PlayerState) => boolean;
     getZibaiGraceBonus?: () => number;
+    isSigewinneTempActive?: (player: PlayerState) => boolean;
+    getClorindeDuelConvert?: (player: PlayerState, card: Card) => boolean;
   } | null = null;
 
   constructor(
@@ -91,6 +96,28 @@ export class CardEffectManager {
 
   async handleActivePlay(card: Card, source: PlayerState): Promise<boolean> {
     card.cardSource = source;
+    // 出牌语音（根据牌名和角色性别播放）
+    VoiceManager.getInstance().playCardVoice(source.gender, card.name);
+
+    // 魈-降魔：检查花色是否被封印（不能主动使用该花色的牌）
+    if (this.skillManager && this.skillManager.isSuitSealed(card.suit)) {
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【降魔】${card.suit}花色已被封印，${source.name} 无法主动使用 ${getCardDetail(card)}！`
+      });
+      return false;
+    }
+
+    // 恰斯卡-超越：记录本回合使用了杀/决斗
+    (this.skillManager as any)?.chascaTrackSlashOrDuel?.(source);
+
+    // 法尔伽-北风：使用杀时可弃牌令其不计次数（在处理杀逻辑之前）
+    if (isSlash(card) && (this.skillManager as any)?.varkaNorthwindPrompt) {
+      const northwindUsed = await (this.skillManager as any).varkaNorthwindPrompt(source);
+      if (northwindUsed) {
+        // 北风已弃牌，此杀不计次数（在executeSlashLogic中不增加slashUsedCount）
+        (card as any)._varkaNorthwind = true;
+      }
+    }
 
     // 装备牌
     if (card.type === CardType.Equipment) {
@@ -119,7 +146,14 @@ export class CardEffectManager {
 
     // 妮露-水月：红色手牌当杀
     if (this.skillManager?.getNilouStanceConvert?.(source, card) === '杀') {
+      VoiceManager.getInstance().playSkillVoice('nilou', '水月', source.id);
       return this.executeSlashLogic(card, source);
+    }
+
+    // 克洛琳德-决斗：高点数手牌当决斗打出
+    if (this.skillManager?.getClorindeDuelConvert?.(source, card)) {
+      VoiceManager.getInstance().playSkillVoice('clorinde', '决斗', source.id);
+      return await this.executeDuel(card, source);
     }
 
     // 基本牌和锦囊
@@ -204,8 +238,11 @@ export class CardEffectManager {
     const isKeqingThunder = source.heroId === 'keqing' && card.element === ElementType.Electro;
     // 夜枭 / 诸葛连弩检查：无限杀
     const isOwlUnrestricted = this.skillManager?.isDilucOwlActive(source) ?? false;
+    // 恰斯卡-超越：下回合出杀次数+2
+    const chascaBeyondActive = (this.skillManager as any)?.getData?.(source.id)?.chascaBeyondActive ?? false;
+    const maxSlashCount = chascaBeyondActive ? 3 : 1; // +2 → 总共3次
     if (!isKeqingThunder && !isOwlUnrestricted && !this.equipManager.canSlashUnrestricted(source)) {
-      if (source.slashUsedCount >= 1) {
+      if (source.slashUsedCount >= maxSlashCount) {
         this.eventBus.emit(GameEvent.Log, { message: '本回合使用【杀】的次数已达上限。' });
         return false;
       }
@@ -216,6 +253,15 @@ export class CardEffectManager {
       !t.isDead && t !== source &&
       getWeaponRange(source) >= getDistance(source, t, this.allPlayers)
     );
+
+    // 法尔伽-写信：写信目标无视距离加入可选目标
+    const varkaLetterId = (this.skillManager as any)?.getVarkaLetterTarget?.(source.id);
+    if (varkaLetterId !== null && varkaLetterId !== undefined) {
+      const letterTarget = this.allPlayers.find(p => p.id === varkaLetterId && !p.isDead && p !== source);
+      if (letterTarget && !validTargets.includes(letterTarget)) {
+        validTargets.push(letterTarget);
+      }
+    }
 
     // 技能钩子：排除不能成为杀的目标（雷电将军-永恒）
     if (this.skillManager) {
@@ -269,7 +315,8 @@ export class CardEffectManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `【骑队】${source.name} 对 ${selectedTargets.map(t => t.name).join('、')} 使用【杀】！伤害=${cavalryDamage}点。`
       });
-      source.slashUsedCount++;
+      VoiceManager.getInstance().playSkillVoice('kaeya', '骑队', source.id);
+      if (!(card as any)._varkaNorthwind) source.slashUsedCount++;
       await this.processSlashTargets(card, source, selectedTargets, cavalryDamage);
       return true;
     }
@@ -288,8 +335,8 @@ export class CardEffectManager {
 
     if (selectedTargets.length === 0) return false;
 
-    // 刻晴-玉衡：雷杀不计入出杀次数
-    if (!isKeqingThunder) {
+    // 刻晴-玉衡：雷杀不计入出杀次数；法尔伽-北风：已弃牌不计次数
+    if (!isKeqingThunder && !(card as any)._varkaNorthwind) {
       source.slashUsedCount++;
     }
     await this.processSlashTargets(card, source, selectedTargets);
@@ -314,8 +361,8 @@ export class CardEffectManager {
       if (this.skillManager?.shouldConvertDilucFireSlash(source)) {
         cardCopy.element = ElementType.Pyro;
       }
-      // 朱雀羽扇
-      this.equipManager.modifySlashElementBeforeProcess(source, cardCopy);
+      // 朱雀羽扇（需await用户确认）
+      await this.equipManager.modifySlashElementBeforeProcess(source, cardCopy);
       // 雌雄双股剑
       await this.equipManager.handleWeaponBeforeDodge(source, target);
 
@@ -328,15 +375,32 @@ export class CardEffectManager {
     if (source.heroId === 'eula') {
       const dist = getDistance(target, source, this.allPlayers);
       damage = Math.max(1, dist);
+      VoiceManager.getInstance().playSkillVoice('eula', '浪花', source.id);
     }
 
     // 申鹤-劈观：使用杀指定目标后可给冰翎标记（在索要闪之前触发）
     if (this.skillManager) {
-      this.skillManager.applyShenheIceFeather(source, target);
+      await this.skillManager.applyShenheIceFeather(source, target);
+    }
+
+    // 法尔伽-远征：杀指定距离>1的目标时摸1张牌
+    if (this.skillManager && (this.skillManager as any).varkaExpeditionCheck) {
+      (this.skillManager as any).varkaExpeditionCheck(source, target);
     }
 
     this.eventBus.emit(GameEvent.Log, { message: `${source.name} 对 ${target.name} 使用了 ${getCardDetail(card)}！` });
     this.eventBus.emit(GameEvent.CardTargeted, { sourceId: source.id, targetId: target.id, cardName: card.name });
+
+    // 刻晴-玉衡：打出雷杀时触发语音
+    if (source.heroId === 'keqing') {
+      VoiceManager.getInstance().playSkillVoice('keqing', '玉衡', source.id);
+    }
+
+    // 技能钩子：金鹏（魈）- 被杀时需来源出花色不同的额外杀
+    if (this.skillManager && this.skillManager.isXiaoGoldenwingActive(target)) {
+      const gwResult = await this.skillManager.onXiaoGoldenwingSlash(target, source, card);
+      if (gwResult.intercepted) return; // 杀无效
+    }
 
     // 技能钩子：价格（基尼奇）- 被杀时需来源出额外杀
     let dodgeForced = false;
@@ -358,7 +422,7 @@ export class CardEffectManager {
       const ignoreArmor = this.equipManager.shouldIgnoreArmor(source) ||
         (source.heroId === 'keqing' && card.element === ElementType.Electro);
       if (!ignoreArmor) {
-        armorDodged = this.equipManager.handleArmorOnResponse(target, '闪', card, source);
+        armorDodged = await this.equipManager.handleArmorOnResponse(target, '闪', card, source);
         dodgeSuccess = armorDodged;
       } else {
         if (source.heroId === 'keqing') {
@@ -369,20 +433,32 @@ export class CardEffectManager {
       }
 
       if (!dodgeSuccess) {
-        // 申鹤-冰翎：需使用两张闪
-        const needDoubleDodge = this.skillManager?.hasIceFeather(target) ?? false;
-        if (needDoubleDodge) {
-          this.eventBus.emit(GameEvent.Log, { message: `【冰翎】${target.name} 需要使用两张【闪】才能抵消！` });
-          const flashCard1 = await this.damageSystem.askForResponse(target, '闪', card, source, driver);
-          if (flashCard1) {
-            const flashCard2 = await this.damageSystem.askForResponse(target, '闪', card, source, driver);
-            dodgeSuccess = !!flashCard2;
-          } else {
-            dodgeSuccess = false;
-          }
+        // 赛诺-素论：武器距离≥4不可闪避，≥2需双闪
+        const cynoReq = (this.skillManager as any)?.getCynoDodgeRequirement?.(source) ?? 1;
+        if (cynoReq === 0) {
+          // 不可闪避
+        } else if (cynoReq === 2) {
+          this.eventBus.emit(GameEvent.Log, { message: `【素论】${source.name} 武器距离≥2，${target.name} 需要使用两张【闪】才能抵消！` });
+          VoiceManager.getInstance().playSkillVoice('cyno', '素论', source.id);
+          const fc1 = await this.damageSystem.askForResponse(target, '闪', card, source, driver);
+          if (fc1) { const fc2 = await this.damageSystem.askForResponse(target, '闪', card, source, driver); dodgeSuccess = !!fc2; }
+          else { dodgeSuccess = false; }
         } else {
-          const flashCard = await this.damageSystem.askForResponse(target, '闪', card, source, driver);
-          dodgeSuccess = !!flashCard;
+          // 申鹤-冰翎：需使用两张闪
+          const needDoubleDodge = this.skillManager?.hasIceFeather(target) ?? false;
+          if (needDoubleDodge) {
+            this.eventBus.emit(GameEvent.Log, { message: `【冰翎】${target.name} 需要使用两张【闪】才能抵消！` });
+            const flashCard1 = await this.damageSystem.askForResponse(target, '闪', card, source, driver);
+            if (flashCard1) {
+              const flashCard2 = await this.damageSystem.askForResponse(target, '闪', card, source, driver);
+              dodgeSuccess = !!flashCard2;
+            } else {
+              dodgeSuccess = false;
+            }
+          } else {
+            const flashCard = await this.damageSystem.askForResponse(target, '闪', card, source, driver);
+            dodgeSuccess = !!flashCard;
+          }
         }
       }
 
@@ -409,6 +485,7 @@ export class CardEffectManager {
       // 申鹤-鹤归：杀造成伤害后给目标添加冰寒标记
       if (!target.isDead && source.heroId === 'shenhe' && this.skillManager) {
         this.skillManager.applyFrostMark(target, source.name, '鹤归');
+        VoiceManager.getInstance().playSkillVoice('shenhe', '鹤归', source.id);
       }
 
       // 麒麟弓 / 甘雨-麟迹
@@ -416,6 +493,10 @@ export class CardEffectManager {
         this.equipManager.handleWeaponAfterDamageEffect(source, target);
         // 甘雨-麟迹：没有武器时默认拥有麒麟弓效果
         if (this.skillManager?.isGanyuKylinActive(source)) {
+          this.eventBus.emit(GameEvent.Log, {
+            message: `【麟迹】${source.name} 发动麟迹，默认拥有麒麟弓效果！`
+          });
+          VoiceManager.getInstance().playSkillVoice('ganyu', '麟迹', source.id);
           // 复用麒麟弓逻辑：弃置目标的坐骑
           const horseSlots: EquipmentType[] = [];
           if (target.equipZone[EquipmentType.DefensiveHorse]) horseSlots.push(EquipmentType.DefensiveHorse);
@@ -452,8 +533,15 @@ export class CardEffectManager {
       this.eventBus.emit(GameEvent.Log, { message: '体力值已满，无法使用【桃】。' });
       return false;
     }
-    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 使用了 ${getCardDetail(card)}` });
-    await this.damageSystem.applyHpChange(source, 1);
+    // 希格雯-温度：桃回复量+2
+    const healAmount = (this.skillManager?.isSigewinneTempActive?.(source)) ? 3 : 1;
+    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 使用了 ${getCardDetail(card)}${healAmount > 1 ? '【温度】回复+2！' : ''}` });
+    if (healAmount > 1) VoiceManager.getInstance().playSkillVoice('sigewinne', '温度', source.id);
+    await this.damageSystem.applyHpChange(source, healAmount);
+    // 提纳里-生论：使用桃时可额外指定一名其他角色回复
+    if (this.skillManager && source.heroId === 'tighnari') {
+      await (this.skillManager as any).tighnariBiologyPrompt?.(source, this.buildContext(source.id));
+    }
     return true;
   }
 
@@ -502,7 +590,7 @@ export class CardEffectManager {
       }
 
       // 防具检查
-      const armorBlocked = this.equipManager.handleArmorOnResponse(target, responseCardName, card, source);
+      const armorBlocked = await this.equipManager.handleArmorOnResponse(target, responseCardName, card, source);
       if (armorBlocked) continue;
 
       // 琴-蒲骑：跳过AOE并摸牌
@@ -525,6 +613,7 @@ export class CardEffectManager {
         // 甘雨-霜华：万箭齐发造成伤害后给目标添加冰寒标记
         if (!target.isDead && source.heroId === 'ganyu' && card.name === '万箭齐发' && this.skillManager) {
           this.skillManager.applyFrostMark(target, source.name, '霜华');
+          VoiceManager.getInstance().playSkillVoice('ganyu', '霜华', source.id);
         }
       }
     }
@@ -544,7 +633,7 @@ export class CardEffectManager {
 
     // 技能钩子：成为非延时锦囊目标（哥伦比娅-少女）
     if (this.skillManager) {
-      const magicResult = this.skillManager.onMagicTargeted(target, card);
+      const magicResult = await this.skillManager.onMagicTargeted(target, card);
       if (magicResult.intercepted) return true;
     }
 
@@ -567,6 +656,7 @@ export class CardEffectManager {
         // 神里绫华-霜灭：决斗造成伤害后给目标添加冰寒标记
         if (!currentRespondent.isDead && source.heroId === 'ayaka' && this.skillManager) {
           this.skillManager.applyFrostMark(currentRespondent, source.name, '霜灭');
+          VoiceManager.getInstance().playSkillVoice('ayaka', '霜灭', source.id);
         }
         return true;
       }
@@ -576,8 +666,13 @@ export class CardEffectManager {
   // ======================== 火攻 ========================
 
   private async executeFireAttack(card: Card, source: PlayerState): Promise<boolean> {
-    const validTargets = this.allPlayers.filter(t => !t.isDead && t.handCards.length > 0);
     const driver = this.drivers.get(source.id)!;
+    const driverAny = driver as any;
+    // 火攻只能对敌方使用（非友方）
+    const validTargets = this.allPlayers.filter(t =>
+      !t.isDead && t.handCards.length > 0 && t !== source &&
+      (typeof driverAny.isEnemy === 'function' ? driverAny.isEnemy(source, t) : false));
+    if (validTargets.length === 0) { this.eventBus.emit(GameEvent.Log, { message: '没有可攻击的目标。' }); return false; }
     const targetId = await driver.promptTarget(source, validTargets.map(t => t.id), '火攻', this.buildContext(source.id));
     if (targetId === null) return false;
     const target = validTargets.find(t => t.id === targetId)!;
@@ -587,7 +682,7 @@ export class CardEffectManager {
 
     // 技能钩子：成为非延时锦囊目标（哥伦比娅-少女）
     if (this.skillManager) {
-      const magicResult = this.skillManager.onMagicTargeted(target, card);
+      const magicResult = await this.skillManager.onMagicTargeted(target, card);
       if (magicResult.intercepted) return true;
     }
 
@@ -614,6 +709,10 @@ export class CardEffectManager {
     const sourceResp = await this.damageSystem.askForSuitResponse(source, shownCard.suit, card, source, driver);
     if (sourceResp) {
       this.eventBus.emit(GameEvent.Log, { message: '火攻成功！' });
+      // 展示火攻所使用的牌（弃置的牌作为伤害牌动画展示）
+      this.eventBus.emit(GameEvent.CardResponded, {
+        playerId: source.id, card: sourceResp, cardName: sourceResp.name
+      });
       await this.damageSystem.applyHpChange(target, -1, card, source);
     } else {
       this.eventBus.emit(GameEvent.Log, { message: `${source.name} 没有同花色牌，火攻失败。` });
@@ -625,7 +724,7 @@ export class CardEffectManager {
   // ======================== 桃园结义 ========================
 
   private async executePeachGarden(card: Card, source: PlayerState): Promise<void> {
-    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 使用了【桃园结义】！` });
+    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 使用了 ${getCardDetail(card)}！` });
 
     const total = this.allPlayers.length;
     const startIndex = this.allPlayers.indexOf(source);
@@ -655,12 +754,15 @@ export class CardEffectManager {
   // ======================== 五谷丰登 ========================
 
   private async executeAmazingGrace(card: Card, source: PlayerState): Promise<void> {
-    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 使用了【五谷丰登】！` });
+    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 使用了 ${getCardDetail(card)}！` });
 
     const alivePlayers = getAlivePlayers(this.allPlayers);
     const zibaiBonus = this.skillManager?.getZibaiGraceBonus?.() || 0;
     const totalCards = alivePlayers.length + zibaiBonus;
     const tableCards = this.deck.dealToTable(totalCards);
+
+    // 已选牌ID集合，防止 _pickedBy 标记丢失导致重复选取
+    const pickedCardIds = new Set<number>();
 
     // 发出事件让UI立即展示所有牌（持久化窗口），传递所有存活玩家名
     this.eventBus.emit(GameEvent.CardsDealtToTable, {
@@ -673,6 +775,8 @@ export class CardEffectManager {
       this.eventBus.emit(GameEvent.Log, {
         message: `【三尸】兹白存活，【五谷丰登】多亮出1张牌（共${totalCards}张）。`
       });
+      const zibai = this.allPlayers.find(p => p.heroId === 'zibai' && !p.isDead);
+      if (zibai) VoiceManager.getInstance().playSkillVoice('zibai', '三尸', zibai.id);
     }
 
     // 从 source 开始按顺序选
@@ -688,8 +792,30 @@ export class CardEffectManager {
         continue;
       }
 
-      // 过滤出未被选的牌
-      let availableCards = tableCards.filter(c => !(c as any)._pickedBy);
+      // 哥伦比娅-少女：询问是否移去标记跳过五谷丰登
+      if (picker.heroId === 'columbina' && this.skillManager) {
+        const cData = (this.skillManager as any).getData?.(picker.id);
+        if (cData && !cData.lostMaiden && (cData.emptyMoonCount || 0) > 0) {
+          const cDriver = this.drivers.get(picker.id);
+          const cDriverAny = cDriver as any;
+          const useIt = typeof cDriverAny?.promptYesNo === 'function'
+            ? await cDriverAny.promptYesNo(`是否移去1枚"空月"标记（剩余${cData.emptyMoonCount}枚）令【五谷丰登】对你无效？`)
+            : false;
+          if (useIt) {
+            cData.emptyMoonCount--;
+            this.eventBus.emit(GameEvent.Log, {
+              message: `【少女】${picker.name} 移去1枚"空月"标记，令【五谷丰登】对自己无效。（剩余${cData.emptyMoonCount}枚）`
+            });
+            this.eventBus.emit(GameEvent.GraceCardPicked, { cardId: -1, pickerName: picker.name });
+            continue;
+          }
+        }
+      }
+
+      // 过滤出未被选的牌（双保险：_pickedBy标记 + pickedCardIds集合）
+      let availableCards = tableCards.filter(c =>
+        !(c as any)._pickedBy && !pickedCardIds.has(c.id)
+      );
       if (availableCards.length === 0) break;
 
       const driver = this.drivers.get(picker.id)!;
@@ -698,15 +824,18 @@ export class CardEffectManager {
       // 兹白可以获得两张牌
       const maxPicks = isZibai ? 2 : 1;
       for (let pick = 0; pick < maxPicks; pick++) {
-        availableCards = tableCards.filter(c => !(c as any)._pickedBy);
+        availableCards = tableCards.filter(c =>
+          !(c as any)._pickedBy && !pickedCardIds.has(c.id)
+        );
         if (availableCards.length === 0) break;
 
         const choice = await driver.promptAmazingGrace(picker, availableCards, this.buildContext(picker.id));
         const idx = Math.max(0, Math.min(choice, availableCards.length - 1));
         const chosen = availableCards[idx];
-        // 标记已选
+        // 标记已选（双重保险：对象属性 + ID集合）
         (chosen as any)._pickedBy = picker.id;
         (chosen as any)._pickerName = picker.name;
+        pickedCardIds.add(chosen.id);
         picker.handCards.push(chosen);
         this.eventBus.emit(GameEvent.Log, { message: `${picker.name} 挑选了 ${getCardDetail(chosen)}` });
 
@@ -721,7 +850,7 @@ export class CardEffectManager {
 
     // 剩余牌（未被选的）进弃牌堆
     for (const remaining of tableCards) {
-      if (!(remaining as any)._pickedBy) {
+      if (!(remaining as any)._pickedBy && !pickedCardIds.has(remaining.id)) {
         this.deck.sendToDiscard(remaining);
       }
     }
@@ -761,7 +890,7 @@ export class CardEffectManager {
 
     // 技能钩子：成为非延时锦囊目标（哥伦比娅-少女）
     if (this.skillManager) {
-      const magicResult = this.skillManager.onMagicTargeted(target, card);
+      const magicResult = await this.skillManager.onMagicTargeted(target, card);
       if (magicResult.intercepted) return true;
     }
 
@@ -793,7 +922,7 @@ export class CardEffectManager {
 
     // 技能钩子：成为非延时锦囊目标（哥伦比娅-少女）
     if (this.skillManager) {
-      const magicResult = this.skillManager.onMagicTargeted(target, card);
+      const magicResult = await this.skillManager.onMagicTargeted(target, card);
       if (magicResult.intercepted) return true;
     }
 
@@ -843,12 +972,12 @@ export class CardEffectManager {
     if (victimId === null) return false;
     const victimB = legalVictims.find(t => t.id === victimId)!;
 
-    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 对 ${targetA.name} 发动了【借刀杀人】，要求对 ${victimB.name} 出杀！` });
-    this.eventBus.emit(GameEvent.CardTargeted, { sourceId: source.id, targetId: targetA.id, cardName: '借刀杀人' });
+    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 对 ${targetA.name} 使用了 ${getCardDetail(card)}，要求对 ${victimB.name} 出杀！` });
+    this.eventBus.emit(GameEvent.CardTargeted, { sourceId: source.id, targetId: targetA.id, cardName: card.name });
 
     // 技能钩子：成为非延时锦囊目标（哥伦比娅-少女）
     if (this.skillManager) {
-      const magicResult = this.skillManager.onMagicTargeted(targetA, card);
+      const magicResult = await this.skillManager.onMagicTargeted(targetA, card);
       if (magicResult.intercepted) return true;
     }
 
@@ -886,7 +1015,11 @@ export class CardEffectManager {
     const mode = await driver.promptIronChainMode(source, this.buildContext(source.id));
 
     if (mode === 'recast') {
+      // 重铸：摸1张牌（铁索由GameFlowController进弃牌堆）
       this.deck.drawCards(source, 1);
+      this.eventBus.emit(GameEvent.Log, {
+        message: `${source.name} 重铸了【铁索连环】，摸1张牌。`
+      });
       return true;
     }
 
@@ -909,14 +1042,14 @@ export class CardEffectManager {
     if (t2Id === null) return false;
     const t2 = alivePlayers.find(p => p.id === t2Id)!;
 
-    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 对 ${t1.name}、${t2.name} 使用了【铁索连环】！` });
+    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 对 ${t1.name}、${t2.name} 使用了 ${getCardDetail(card)}！` });
     this.eventBus.emit(GameEvent.CardTargeted, { sourceId: source.id, targetId: t1.id, cardName: '铁索连环' });
     this.eventBus.emit(GameEvent.CardTargeted, { sourceId: source.id, targetId: t2.id, cardName: '铁索连环' });
 
     for (const target of [t1, t2]) {
       // 技能钩子：成为非延时锦囊目标（哥伦比娅-少女）
       if (this.skillManager) {
-        const magicResult = this.skillManager.onMagicTargeted(target, card);
+        const magicResult = await this.skillManager.onMagicTargeted(target, card);
         if (magicResult.intercepted) continue;
       }
       if (await this.askForNullificationStack(target, source, false, card)) {
@@ -950,7 +1083,8 @@ export class CardEffectManager {
     if (targetId === null) return false;
     const target = validTargets.find(t => t.id === targetId)!;
 
-    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 对 ${target.name} 使用了【${kitName}】！` });
+    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 对 ${target.name} 使用了 ${getCardDetail(card)}！` });
+    this.eventBus.emit(GameEvent.CardTargeted, { sourceId: source.id, targetId: target.id, cardName: kitName });
 
     target.judgeZone.push(card);
     this.eventBus.emit(GameEvent.CardMovedToJudge, {
@@ -966,6 +1100,7 @@ export class CardEffectManager {
   private executeLightning(card: Card, source: PlayerState): boolean {
     if (source.judgeZone.some(c => c.name === '闪电')) return false;
     source.judgeZone.push(card);
+    this.eventBus.emit(GameEvent.Log, { message: `${source.name} 使用了 ${getCardDetail(card)}` });
     this.eventBus.emit(GameEvent.CardMovedToJudge, {
       playerId: source.id,
       card,
@@ -983,8 +1118,17 @@ export class CardEffectManager {
     magicCard?: Card,
     depth: number = 0
   ): Promise<boolean> {
+    // 艾尔海森-书记：锦囊来源是艾尔海森时，不能被无懈
+    if (magicCard?.cardSource && this.skillManager?.isAlhaithamMagicImmune(magicCard.cardSource)) {
+      return currentState;
+    }
+
+    // 艾尔海森-知论：扣置牌可当无懈可击 + 知论无懈不能被反无懈
+    const hasNullifyInHand = (p: PlayerState) => p.handCards.some(c => c.name === '无懈可击');
+    const hasKnowledgeNullify = (p: PlayerState) => this.skillManager?.hasAlhaithamKnowledge(p) ?? false;
+
     const potentialResponders = this.allPlayers.filter(p =>
-      !p.isDead && p.handCards.some(c => c.name === '无懈可击')
+      !p.isDead && (hasNullifyInHand(p) || hasKnowledgeNullify(p))
     );
 
     if (potentialResponders.length === 0) return currentState;
@@ -997,25 +1141,39 @@ export class CardEffectManager {
       ctx.nullifyCardName = magicCard?.name || '';
       const useIt = await driver.promptNullification(chooser, ctx);
       if (useIt) {
-        const idx = chooser.handCards.findIndex(c => c.name === '无懈可击');
-        if (idx >= 0) {
-          const nullifyCard = chooser.handCards.splice(idx, 1)[0];
+        // 优先用手中的无懈可击，否则用知论牌
+        const handIdx = chooser.handCards.findIndex(c => c.name === '无懈可击');
+        if (handIdx >= 0) {
+          const nullifyCard = chooser.handCards.splice(handIdx, 1)[0];
           nullifyCard.cardSource = chooser;
           this.deck.sendToDiscard(nullifyCard);
           this.eventBus.emit(GameEvent.Log, {
             message: `${chooser.name} 打出了一张【无懈可击】！`
           });
           this.eventBus.emit(GameEvent.CardResponded, {
-            playerId: chooser.id,
-            card: nullifyCard,
-            cardName: '无懈可击'
+            playerId: chooser.id, card: nullifyCard, cardName: '无懈可击'
           });
-          const result = await this.askForNullificationStack(target, chooser, !currentState, magicCard, depth + 1);
-          // 艾尔海森-代贤：第二张无懈打出后，获得原锦囊牌
+          // 触发技能钩子（神里绫华-白鹭等）
+          if (this.skillManager) {
+            await this.skillManager.onAfterCardPlay(chooser, nullifyCard);
+          }
+          // 知论无懈不能被反无懈：depth=0时，chooser用的是知论牌，跳过递归
+          const nextDeeper = await this.askForNullificationStack(target, chooser, !currentState, magicCard, depth + 1);
           if (depth === 1 && magicCard && this.skillManager) {
             await this.skillManager.onDoubleNullify(magicCard, target);
           }
-          return result;
+          return nextDeeper;
+        } else if (this.skillManager?.hasAlhaithamKnowledge(chooser)) {
+          // 使用知论牌当无懈可击
+          this.skillManager.useAlhaithamKnowledge(chooser);
+          this.eventBus.emit(GameEvent.Log, {
+            message: `${chooser.name} 使用了一张"知论"牌当作【无懈可击】（不可反无懈）！`
+          });
+          // 艾尔海森-书记：知论无懈不能被反无懈，直接return（不递归）
+          if (depth === 1 && magicCard && this.skillManager) {
+            await this.skillManager.onDoubleNullify(magicCard, target);
+          }
+          return !currentState;
         }
       }
     }
@@ -1153,8 +1311,16 @@ export class CardEffectManager {
       );
 
       for (const otherPlayer of chainedVictims) {
+        // 跳过在传导过程中已阵亡的角色（前一个连环受害者求桃失败死亡）
+        if (otherPlayer.isDead) continue;
         this.eventBus.emit(GameEvent.Log, { message: `连锁传导 → ${otherPlayer.name}！` });
         await this.damageSystem.applyHpChange(otherPlayer, -finalDamageTaken, sourceCard, source, true);
+        // 传导结算完成：清除该角色的连环标志（无论死亡还是被救活）
+        otherPlayer.isChained = false;
+        this.eventBus.emit(GameEvent.ChainedStateChanged, {
+          playerId: otherPlayer.id,
+          isChained: false
+        });
       }
     }
   }

@@ -17,6 +17,7 @@ import { getHandLimit } from './Player';
 import { getCardDetail } from './Card';
 import { findNextAlivePlayer } from './DistanceCalc';
 import { SuitType, ElementType, Faction } from './types';
+import { VoiceManager } from '../audio/VoiceManager';
 
 export class GameFlowController {
   private allPlayers: PlayerState[];
@@ -34,7 +35,7 @@ export class GameFlowController {
     onTurnStart: (player: PlayerState, ctx: GameContextSnapshot) => Promise<void>;
     onPlayPhaseStart: (player: PlayerState, ctx: GameContextSnapshot) => Promise<void>;
     onPlayPhaseEnd: (player: PlayerState, ctx: GameContextSnapshot) => Promise<void>;
-    onAfterCardPlay: (player: PlayerState) => Promise<void>;
+    onAfterCardPlay: (player: PlayerState, card?: Card) => Promise<void>;
     onTurnEnd: (player: PlayerState, ctx: GameContextSnapshot) => Promise<void>;
     onRoundStart: () => void;
     getEffectiveHandLimit: (player: PlayerState) => number;
@@ -42,7 +43,7 @@ export class GameFlowController {
     onZibaiPlayCardCheck: (player: PlayerState, card: Card, cardsPlayedThisPhase: number) => void;
     onZibaiMultipleCheck: (player: PlayerState, cardsPlayedThisPhase: number) => void;
     onMagicUsed: (player: PlayerState, card: Card) => Promise<boolean>;
-    onMagicTargeted: (player: PlayerState, card: Card) => { intercepted: boolean; data?: any };
+    onMagicTargeted: (player: PlayerState, card: Card) => Promise<{ intercepted: boolean; data?: any }>;
     onBeforeSlashTarget: (target: PlayerState, source: PlayerState) => { intercepted: boolean; data?: any };
     canDelayKitAffect: (player: PlayerState, kitName: string) => boolean;
     isSuitSealed: (suit: string) => boolean;
@@ -77,6 +78,7 @@ export class GameFlowController {
     checkCitlaliShamanResult: (actualSuit: string) => void;
     checkCitlaliObsidian: (judgeResult: Card, judgeTarget: PlayerState, ctx: GameContextSnapshot) => Promise<boolean>;
     getData: (playerId: number) => any;
+    resetTurnFlags: (playerId: number) => void;
   } | null = null;
 
   public roundCount: number = 1;
@@ -321,6 +323,24 @@ export class GameFlowController {
         } else {
           await this.executeTurn(player);
         }
+
+        // 夜兰-幽客：检查被查看者是否死亡，给夜兰额外回合
+        if (this.skillManager && !this.gameOverWinner && !this.aborted) {
+          const yelan = this.allPlayers.find(p => !p.isDead && p.heroId === 'yelan');
+          if (yelan && this.skillManager.hasYelanExtraTurn(yelan)) {
+            // 保存下一玩家的位置，插入夜兰的额外回合
+            const savedNextIndex = currentPlayerIndex; // 先记下当前循环位置
+            const yelanIndex = this.allPlayers.indexOf(yelan);
+            this.eventBus.emit(GameEvent.Log, {
+              message: `【幽客】${yelan.name} 获得一个额外回合！`
+            });
+            currentPlayerIndex = yelanIndex;
+            await this.executeTurn(yelan);
+            this.skillManager.clearYelanExtraTurn(yelan);
+            // 恢复原位置，继续正常流程
+            currentPlayerIndex = savedNextIndex;
+          }
+        }
       }
 
       if (this.gameOverWinner || this.aborted) break;
@@ -375,6 +395,8 @@ export class GameFlowController {
       round: this.roundCount,
       turn: this.currentTurnInRound
     });
+    // 重置回合级标记（赤鬼、封印花色、冰翎等）——服务端必须调用，不止依赖客户端 GamePage
+    this.skillManager?.resetTurnFlags(player.id);
     this.eventBus.emit(GameEvent.Log, {
       message: `\n=== 第 ${this.roundCount} 轮 | 第 ${this.currentTurnInRound} 回合 | ${player.name} HP: ${player.hp}/${player.maxHp} ===`
     });
@@ -446,6 +468,15 @@ export class GameFlowController {
           this.eventBus.emit(GameEvent.Log, {
             message: `【祝福】${player.name} 摸牌数+${xilonenBonus}，共摸${drawCount}张。`
           });
+        }
+        // 瓦雷莎-豪宴：下回合额外摸牌
+        const varesaDrawBonus = (this.skillManager as any)?.getVaresaDrawBonus?.(player) || 0;
+        if (varesaDrawBonus > 0) {
+          drawCount += varesaDrawBonus;
+          this.eventBus.emit(GameEvent.Log, {
+            message: `【豪宴】${player.name} 摸牌数+${varesaDrawBonus}，共摸${drawCount}张。`
+          });
+          VoiceManager.getInstance().playSkillVoice('varesa', '豪宴', player.id);
         }
       }
       this.deck.drawCards(player, drawCount);
@@ -533,6 +564,7 @@ export class GameFlowController {
       if (this.gameOverWinner || this.aborted) return;
 
       const kit = player.judgeZone[i];
+      if (!kit) continue; // 安全防护：判定牌可能在处理中被移除
       const kitSource = kit.cardSource ?? player;
 
       // 可莉炸弹特殊处理：不进入无懈可击，直接判定
@@ -671,6 +703,7 @@ export class GameFlowController {
     };
 
     this.eventBus.emit(GameEvent.Log, { message: `【黑曜】${citlali.name} 与 ${judgeTarget.name} 进行决斗！对方每回合需打出两张【杀】！` });
+    VoiceManager.getInstance().playSkillVoice('citlali', '黑曜', citlali.id);
     this.eventBus.emit(GameEvent.CardTargeted, { sourceId: citlali.id, targetId: judgeTarget.id, cardName: '决斗' });
 
     let currentRespondent = judgeTarget;
@@ -776,6 +809,9 @@ export class GameFlowController {
     const result = this.skillManager!.handleBombJudge(kit, player, judgeResult);
     const { bombExploded, moveBomb } = await result;
 
+    // 那维莱特-龙权：炸弹判定后摸牌
+    this.skillManager!.onAfterJudge(player, judgeResult, '炸弹', bombExploded);
+
     // 移除炸弹
     player.judgeZone.splice(indexInZone, 1);
 
@@ -802,17 +838,23 @@ export class GameFlowController {
 
     const ctx = this.buildContext(player.id);
 
-    // 循环尝试所有可用主动技能（每个技能独立判断是否发动）
+    // 已尝试过的技能ID集合：无论成功或失败，每技能每回合最多尝试1次
+    const attemptedSkillIds = new Set<string>();
+    const maxTries = 6;
     let triedCount = 0;
-    const maxTries = 5; // 防止无限循环
+
     while (this.gameOverWinner === null && !this.aborted && triedCount < maxTries) {
       triedCount++;
-      const availableSkills = this.skillManager.getActiveSkills(player, ctx);
+      const availableSkills = this.skillManager.getActiveSkills(player, ctx)
+        .filter(s => !attemptedSkillIds.has(s.id));
       if (availableSkills.length === 0) return;
 
       // 让 AI 选择要发动的技能
       const skillId = (driver as any).promptActiveSkill(player, availableSkills, ctx);
       if (!skillId) return;
+
+      // 记录已尝试（无论是否成功）
+      attemptedSkillIds.add(skillId);
 
       // 执行选中的技能
       const skill = availableSkills.find(s => s.id === skillId);
@@ -832,6 +874,41 @@ export class GameFlowController {
     }
   }
 
+  /** 回合结束前发动的技能ID集合（出牌循环结束后、弃牌阶段前） */
+  private static readonly END_OF_TURN_SKILL_IDS = new Set([
+    'kinich_fireback',    // 基尼奇-回火：需要装备在装备区
+    'jean_agent',         // 琴-代理：交换手牌
+    'klee_bombfish',      // 可莉-炸鱼：放置炸弹
+    'alhaitham_knowledge',// 艾尔海森-知论：存无懈可击
+    'olorun_flute',       // 欧洛伦-庇笛：当闪电
+  ]);
+
+  /** AI 回合结束前发动技能 */
+  private async aiExecuteEndOfTurnSkills(player: PlayerState, driver: IPlayerDriver): Promise<void> {
+    if (!this.skillManager) return;
+    const ctx = this.buildContext(player.id);
+    const attemptedSkillIds = new Set<string>();
+
+    for (let tries = 0; tries < 5; tries++) {
+      const availableSkills = this.skillManager.getActiveSkills(player, ctx)
+        .filter(s => GameFlowController.END_OF_TURN_SKILL_IDS.has(s.id)
+                  && !attemptedSkillIds.has(s.id));
+      if (availableSkills.length === 0) return;
+
+      const skillId = (driver as any).promptActiveSkill(player, availableSkills, ctx);
+      if (!skillId) return;
+      attemptedSkillIds.add(skillId);
+
+      const skill = availableSkills.find(s => s.id === skillId);
+      if (!skill) return;
+
+      this.eventBus.emit(GameEvent.Log, {
+        message: `🤖 ${player.name}（AI）回合结束前发动了技能【${skill.name}】`
+      });
+      await this.skillManager.executeActiveSkill(player, skillId, ctx);
+    }
+  }
+
   private async playPhase(player: PlayerState): Promise<void> {
     this.eventBus.emit(GameEvent.PhaseChanged, { playerId: player.id, phase: GamePhase.Play });
 
@@ -841,10 +918,9 @@ export class GameFlowController {
       await this.aiExecuteActiveSkills(player, driver);
     }
 
-    // 死循环防护：记录本回合已尝试但失败的牌名及失败次数
-    const failedCards: Map<string, number> = new Map();
-    const MAX_RETRY_PER_CARD = 1; // 每张牌最多重试1次（即第一次失败后，第二次仍然失败就跳过）
-    const MAX_CONSECUTIVE_FAILURES = 8; // 连续失败上限：防止AI死循环，但不影响正常出牌
+    // 死循环防护：记录本回合使用失败的牌ID（按卡牌实例），回合结束后清空
+    const failedCardIds: Set<number> = new Set();
+    const MAX_CONSECUTIVE_FAILURES = 8; // 连续失败上限：防止AI死循环
     let consecutiveFailures = 0;
     let cardsPlayedThisPhase = 0; // 兹白三尸：出牌阶段已打出牌数
 
@@ -907,13 +983,11 @@ export class GameFlowController {
         let selected = player.handCards[choice];
         let cardName = selected.name;
 
-        // 死循环检测：如果这张牌已经失败过，检查是否超过重试上限
-        const failCount = failedCards.get(cardName) || 0;
-        if (failCount >= MAX_RETRY_PER_CARD) {
+        // 死循环检测：若此牌ID已记录为失败，跳过
+        if (failedCardIds.has(selected.id)) {
           this.eventBus.emit(GameEvent.Log, {
-            message: `${getCardDetail(selected)} 已连续使用失败，本回合不再尝试打出。`
+            message: `${getCardDetail(selected)} 本回合已使用失败，不再尝试打出。`
           });
-          // 使用 getNextBestCardIndex 跳过已失败的牌名，而不是回到循环顶部（避免AI再次选同一张牌）
           if (driver.getNextBestCardIndex) {
             const nextIdx = driver.getNextBestCardIndex(player, {
               players: this.allPlayers,
@@ -925,7 +999,7 @@ export class GameFlowController {
               discardPileCount: this.deck.discardPile.length,
               nilouStance: (this.skillManager as any)?.getData?.(player.id)?.nilouStance,
               cardsPlayedThisPhase,
-            }, cardName);
+            }, failedCardIds);
             if (nextIdx >= 0) {
               // 用新索引替换 choice，让下面的正常流程处理
               choice = nextIdx;
@@ -990,7 +1064,7 @@ export class GameFlowController {
             await this.skillManager.checkNefurSecretOnUse(player, selected);
           }
           // 成功后清除此牌的失败记录，重置连续失败计数
-          failedCards.delete(cardName);
+          failedCardIds.delete(selected.id);
           consecutiveFailures = 0;
           // 兹白-三尸：出牌阶段计数+质数/5的倍数检测
           if (this.skillManager) {
@@ -1008,11 +1082,12 @@ export class GameFlowController {
               const sd = this.skillManager.getData(player.id);
               if (sd?._lyneyaTopCardLog) {
                 this.eventBus.emit(GameEvent.Log, { message: sd._lyneyaTopCardLog });
+                VoiceManager.getInstance().playSkillVoice('lyneya', '启喻', player.id);
                 delete sd._lyneyaTopCardLog;
               }
             }
-            // 神里绫华-白鹭：每打出一张牌即时检查，手牌不足时摸至体力值
-            await this.skillManager.onAfterCardPlay(player);
+            // 神里绫华-白鹭：每打出一张牌即时检查，手牌不足时摸至体力值/破镜/牛劲
+            await this.skillManager.onAfterCardPlay(player, selected);
           }
           await this.sleep(this.aiActionDelayMs);
         } else {
@@ -1036,15 +1111,19 @@ export class GameFlowController {
           } else {
             player.handCards.splice(choice, 0, selected);
             this.eventBus.emit(GameEvent.Log, { message: `${getCardDetail(selected)} 使用失败，已返还。` });
-            // 记录失败次数
-            failedCards.set(cardName, failCount + 1);
+            // 强制同步状态：酒失败后标记已使用，防止AI死循环
+            if (selected.name === '酒') {
+              player.wineUsedThisTurn = true;
+              player.nextSlashDamageBonus = 1;
+            }
+            // 记录本张牌失败（按卡牌ID），本回合不再尝试打出同一张牌
+            failedCardIds.add(selected.id);
             consecutiveFailures++;
 
-            // 如果手牌中只剩这一张失败过的牌，且已达到重试上限，自动结束出牌
-            const allFailed = player.handCards.every(c =>
-              (failedCards.get(c.name) || 0) >= MAX_RETRY_PER_CARD
-            );
-            if (allFailed && player.handCards.length > 0) {
+            // 如果所有手牌都在失败列表中，自动结束出牌阶段
+            const allFailed = player.handCards.length > 0 &&
+              player.handCards.every(c => failedCardIds.has(c.id));
+            if (allFailed) {
               this.eventBus.emit(GameEvent.Log, {
                 message: `${player.name} 所有手牌均已无法使用，结束出牌阶段。`
               });
@@ -1056,14 +1135,21 @@ export class GameFlowController {
         if (this.gameOverWinner || this.aborted) return;
       }
     }
-  }
 
-  // ======================== 弃牌阶段 ========================
+    // 回合结束前发动技能（在出牌循环结束后、弃牌阶段前）
+    await this.aiExecuteEndOfTurnSkills(player, driver);
+  }
 
   private async discardPhase(player: PlayerState): Promise<void> {
     this.eventBus.emit(GameEvent.PhaseChanged, { playerId: player.id, phase: GamePhase.Discard });
 
-    while (player.handCards.length > getHandLimit(player)) {
+    // 瓦雷莎-豪宴：手牌上限=20
+    const effectiveHandLimit = this.skillManager
+      ? (this.skillManager as any).getVaresaHandLimit?.() ?? getHandLimit(player)
+      : getHandLimit(player);
+    const handLimit = player.heroId === 'varesa' ? effectiveHandLimit : getHandLimit(player);
+
+    while (player.handCards.length > handLimit) {
       const driver = this.drivers.get(player.id)!;
       const choice = await driver.promptDiscard(player, {
         players: this.allPlayers,

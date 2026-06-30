@@ -11,13 +11,14 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   '简单': '#4caf50', '普通': '#ff9800', '困难': '#f44336', '极难': '#9c27b0',
 };
 
-/** 获取当前玩家等级（优先从服务器账号，否则从本地存储） */
+/** 获取当前玩家等级 */
 function getPlayerLevel(): number {
-  if (socketManager.account?.level) return socketManager.account.level;
-  try {
-    const raw = localStorage.getItem('genshin_card_local_exp');
-    if (raw) return JSON.parse(raw).level || 1;
-  } catch { }
+  const lv = socketManager.account?.level;
+  if (typeof lv === 'number' && lv > 0) return lv;
+  // 从服务端账号获取等级
+  if (socketManager.account != null && typeof socketManager.account.level === 'number' && socketManager.account.level > 0) {
+    return socketManager.account.level;
+  }
   return 1;
 }
 
@@ -184,6 +185,41 @@ export class ChaptersPage {
     return map[n] || String(n);
   }
 
-  show(): void { this.el.classList.add('active'); }
+  show(): void { this.el.classList.add('active'); this.refreshStars(); }
   hide(): void { this.el.classList.remove('active'); }
+
+  /** 重新读取本地星级数据并更新DOM中的星级显示 */
+  private refreshStars(): void {
+    const starsRecord = getPVEStarRecords();
+    const cards = this.trackEl.querySelectorAll('.chapter-card');
+    let cardIdx = 0;
+    CHAPTERS.forEach((ch) => {
+      if (cardIdx >= cards.length) return;
+      const card = cards[cardIdx];
+      const statusEl = card.querySelector('.chapter-status');
+      if (!statusEl) { cardIdx++; return; }
+      const unlocked = isChapterUnlocked(ch, getPlayerLevel());
+      const totalStars = ch.levels.reduce((s, l) => s + (starsRecord[l.id] || 0), 0);
+      if (ch.placeholder) {
+        // 占位章节不变
+      } else if (!unlocked) {
+        const prevIdx = CHAPTERS.findIndex(c => c.id === ch.id) - 1;
+        const prevChapter = prevIdx >= 0 ? CHAPTERS[prevIdx] : null;
+        const playerLv = getPlayerLevel();
+        if (playerLv < ch.requiredLevel) {
+          statusEl.innerHTML = `🔒 需要等级 ${ch.requiredLevel} 解锁`;
+          statusEl.className = 'chapter-status locked-status';
+        } else if (prevChapter) {
+          const prevStars = getChapterStars(prevChapter.id);
+          statusEl.innerHTML = `🔒 需${prevChapter.name}累计${prevStars}/20星`;
+          statusEl.className = 'chapter-status locked-status';
+        }
+      } else if (ch.levels.length > 0) {
+        const maxStars = ch.levels.length * 3;
+        statusEl.innerHTML = `⭐ ${totalStars}/${maxStars} 星 · 已开放`;
+        statusEl.className = 'chapter-status';
+      }
+      cardIdx++;
+    });
+  }
 }

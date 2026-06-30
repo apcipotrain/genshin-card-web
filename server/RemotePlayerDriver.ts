@@ -6,7 +6,7 @@
 import type { Socket } from 'socket.io';
 import type { IPlayerDriver, PlayerState, Card, GameContextSnapshot, ZoneSelection } from '../src/core/types.js';
 
-const TIMEOUT_MS = 15000; // 15秒
+const TIMEOUT_MS = 10000; // 10秒
 
 export class RemotePlayerDriver implements IPlayerDriver {
   readonly playerId: number;
@@ -69,7 +69,7 @@ export class RemotePlayerDriver implements IPlayerDriver {
     return this.request('playCard', { state: this.sanitizeState(state), ctx: this.sanitizeContext(ctx) }, -1);
   }
 
-  getNextBestCardIndex?(state: PlayerState, ctx: GameContextSnapshot, excludeName: string): number {
+  getNextBestCardIndex?(state: PlayerState, ctx: GameContextSnapshot, excludeIds: Set<number>): number {
     // Remote 客户端自行决定，服务器不做 fallback
     return -1;
   }
@@ -186,12 +186,23 @@ export class RemotePlayerDriver implements IPlayerDriver {
   }
 
   async promptSelectCard?(state: PlayerState, title: string, filter: (card: Card) => boolean, ctx: GameContextSnapshot): Promise<number> {
-    // filter 函数无法序列化，特殊处理
+    // filter 函数无法序列化，特殊处理：客户端显示所有手牌，服务端校验
     return this.request('selectCard', {
       state: this.sanitizeState(state),
       title,
+      filterHint: 'all', // 提示客户端显示所有手牌（filter无法序列化）
       ctx: this.sanitizeContext(ctx),
-    }, -1);
+    }, -1).then((result: number) => {
+      // 服务端校验：确保返回的牌符合filter
+      if (result >= 0 && result < state.handCards.length) {
+        const card = state.handCards[result];
+        if (!filter(card)) {
+          console.warn(`[RemotePlayerDriver] 客户端选择的牌不符合filter: ${card.name}, 返回-1`);
+          return -1;
+        }
+      }
+      return result;
+    });
   }
 
   // ---------- 状态脱敏（循环引用 + 身份隐藏） ----------

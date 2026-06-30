@@ -156,8 +156,8 @@ export interface IPlayerDriver {
   /** 出牌阶段：选择出哪张牌，返回手牌索引，-1 表示结束出牌，-2 表示发动丈八蛇矛 */
   promptPlayCard(state: PlayerState, context: GameContextSnapshot): Promise<number>;
 
-  /** 获取手牌中排除指定牌名后的最高优先级牌索引（用于跳过失败牌），-1 表示无其他牌可出 */
-  getNextBestCardIndex?(state: PlayerState, context: GameContextSnapshot, excludeName: string): number;
+  /** 获取手牌中排除指定牌ID后的最高优先级牌索引（用于跳过失败牌），-1 表示无其他牌可出 */
+  getNextBestCardIndex?(state: PlayerState, context: GameContextSnapshot, excludeIds: Set<number>): number;
 
   /** 选择目标玩家，返回玩家 ID，null 表示取消 */
   promptTarget(
@@ -353,6 +353,11 @@ export enum GameEvent {
 
   // 身份分配事件
   RolesAssigned = 'RolesAssigned',
+
+  // 技能语音事件（PVP 服务端→客户端广播）
+  SkillVoicePlay = 'SkillVoicePlay',
+  // 出牌语音事件（PVP 服务端→客户端广播）
+  CardVoicePlay = 'CardVoicePlay',
 }
 
 /** 事件数据 */

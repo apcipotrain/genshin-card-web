@@ -3,6 +3,7 @@
 // ============================================================
 
 import { getGods, getNonGods, getHeroById } from './heroes';
+import { socketManager } from '../network/SocketManager';
 
 // ======================== 类型定义 ========================
 
@@ -30,24 +31,42 @@ export interface PVEChapter {
   placeholder?: boolean;
 }
 
-// ======================== 星级存储 ========================
+// ======================== 星级存储（内存缓存 + localStorage兜底 + 服务端同步） ========================
 
-const STARS_KEY = 'genshin_card_pve_stars';
+const STARS_LOCAL_KEY = 'genshin_card_pve_stars';
+let _pveStars: Record<number, number> = {};
+
+// 页面加载时从 localStorage 恢复
+try {
+  const raw = localStorage.getItem(STARS_LOCAL_KEY);
+  if (raw) _pveStars = JSON.parse(raw);
+} catch {}
+
+/** 从服务端同步星级数据（优先级最高） */
+export function syncPVEStarsFromServer(stars: Record<number, number>): void {
+  if (stars && Object.keys(stars).length > 0) {
+    _pveStars = stars;
+    try { localStorage.setItem(STARS_LOCAL_KEY, JSON.stringify(_pveStars)); } catch {}
+  }
+}
 
 /** 获取所有关卡星级记录 { levelId: stars } */
 export function getPVEStarRecords(): Record<number, number> {
-  try {
-    const raw = localStorage.getItem(STARS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
+  return _pveStars;
 }
 
-/** 保存关卡星级（仅当新星级高于旧星级时更新） */
+/** 保存关卡星级（仅当新星级高于旧星级时更新），异步同步到服务端 */
 export function savePVEStar(levelId: number, stars: number): void {
-  const records = getPVEStarRecords();
-  if (stars > (records[levelId] || 0)) {
-    records[levelId] = stars;
-    localStorage.setItem(STARS_KEY, JSON.stringify(records));
+  if (stars > (_pveStars[levelId] || 0)) {
+    _pveStars[levelId] = stars;
+    // 立即保存到 localStorage 兜底
+    try { localStorage.setItem(STARS_LOCAL_KEY, JSON.stringify(_pveStars)); } catch {}
+    // 异步同步到服务端（带ack确认）
+    if (socketManager.isConnected) {
+      socketManager.emitWithAck?.('save_pve_stars', { stars: _pveStars }).catch(() => {});
+    } else {
+      socketManager.emit('save_pve_stars', { stars: _pveStars });
+    }
   }
 }
 
@@ -102,9 +121,9 @@ const MONDSTADT_LEVELS: PVELevel[] = [
     name: '浪沫之章·第一幕 优菈',
     enemyCount: 2,
     allyCount: 3,
-    enemyHeroes: ['diluc', 'eula'],
+    enemyHeroes: ['eula', 'diluc'],
     turnOrder: ['main', 'ally1', 'ally2', 'eula', 'diluc'],
-    bannedHeroes: ['diluc', 'eula'],
+    bannedHeroes: ['eula', 'diluc'],
   },
   {
     id: 4,
@@ -120,12 +139,21 @@ const MONDSTADT_LEVELS: PVELevel[] = [
     name: '四叶草之章·第一幕 可莉',
     enemyCount: 2,
     allyCount: 3,
-    enemyHeroes: ['klee', 'jean'],
+    enemyHeroes: ['jean', 'klee'],
     turnOrder: ['main', 'ally1', 'ally2', 'jean', 'klee'],
-    bannedHeroes: ['klee', 'jean'],
+    bannedHeroes: ['jean', 'klee'],
   },
   {
     id: 6,
+    name: '白垩之章·第一幕 阿贝多',
+    enemyCount: 3,
+    allyCount: 4,
+    enemyHeroes: ['albedo', 'klee', 'kaeya'],
+    turnOrder: ['main', 'ally1', 'ally2', 'ally3', 'albedo', 'klee', 'kaeya'],
+    bannedHeroes: ['albedo', 'klee', 'kaeya'],
+  },
+  {
+    id: 7,
     name: '歌仙之章·第一幕 温迪一',
     enemyCount: 3,
     allyCount: 4,
@@ -134,30 +162,49 @@ const MONDSTADT_LEVELS: PVELevel[] = [
     bannedHeroes: ['venti', 'jean', 'klee'],
   },
   {
-    id: 7,
+    id: 8,
     name: '歌仙之章·第二幕 温迪二',
     enemyCount: 4,
     allyCount: 4,
-    enemyHeroes: ['venti', 'diluc', 'kaeya', 'eula'],
+    enemyHeroes: ['diluc', 'kaeya', 'eula', 'venti'],
     turnOrder: ['venti', 'main', 'ally1', 'ally2', 'ally3', 'diluc', 'kaeya', 'eula'],
-    bannedHeroes: ['venti', 'diluc', 'kaeya', 'eula'],
+    bannedHeroes: ['diluc', 'kaeya', 'eula', 'venti'],
   },
 ];
 
-// --- 璃月 (8-19关) ---
+// --- 璃月 (9-20关) ---
 const LIYUE_LEVELS: PVELevel[] = [
-  { id: 8,  name: '金翅鹏王之章·第一幕 魈',    enemyCount: 1, allyCount: 1, enemyHeroes: ['xiao'],                           turnOrder: ['main', 'xiao'],                                    bannedHeroes: ['xiao'] },
-  { id: 9,  name: '玑衡仪之章·第一幕 凝光',    enemyCount: 2, allyCount: 3, enemyHeroes: ['ningguang', 'jean'],                turnOrder: ['main', 'ally1', 'ally2', 'ningguang', 'jean'],      bannedHeroes: ['ningguang', 'jean'] },
-  { id: 10, name: '金紫定垂之章·第一幕 刻晴',  enemyCount: 2, allyCount: 3, enemyHeroes: ['keqing', 'ningguang'],             turnOrder: ['main', 'ally1', 'ally2', 'keqing', 'ningguang'],    bannedHeroes: ['keqing', 'ningguang'] },
-  { id: 11, name: '引蝶之章·第一幕 胡桃',       enemyCount: 3, allyCount: 3, enemyHeroes: ['hutao', 'kaeya', 'diluc'],        turnOrder: ['main', 'ally1', 'ally2', 'hutao', 'kaeya', 'diluc'], bannedHeroes: ['hutao', 'kaeya', 'diluc'] },
-  { id: 12, name: '幽客之章·第一幕 夜兰',       enemyCount: 3, allyCount: 3, enemyHeroes: ['yelan', 'ningguang', 'keqing'],   turnOrder: ['yelan', 'main', 'ally1', 'ally2', 'ningguang', 'keqing'], bannedHeroes: ['yelan', 'ningguang', 'keqing'] },
-  { id: 13, name: '仙麟之章·第一幕 甘雨',       enemyCount: 2, allyCount: 2, enemyHeroes: ['ganyu', 'xiao'],                  turnOrder: ['xiao', 'main', 'ally1', 'ganyu'],                    bannedHeroes: ['ganyu', 'xiao'] },
-  { id: 14, name: '愁疏之章·第一幕 申鹤',       enemyCount: 2, allyCount: 2, enemyHeroes: ['ganyu', 'shenhe'],               turnOrder: ['shenhe', 'main', 'ally1', 'ganyu'],                  bannedHeroes: ['ganyu', 'shenhe'] },
-  { id: 15, name: '白驹之章·第一幕 兹白一',     enemyCount: 3, allyCount: 3, enemyHeroes: ['zibai', 'ganyu', 'keqing'],      turnOrder: ['zibai', 'main', 'ally1', 'ally2', 'ganyu', 'keqing'], bannedHeroes: ['ganyu', 'shenhe'] },
-  { id: 16, name: '白驹之章·第二幕 兹白二',     enemyCount: 3, allyCount: 3, enemyHeroes: ['zibai', 'hutao', 'shenhe'],      turnOrder: ['zibai', 'main', 'ally1', 'ally2', 'hutao', 'shenhe'], bannedHeroes: ['zibai', 'hutao', 'shenhe'] },
-  { id: 17, name: '古闻之章·第一幕 钟离一',     enemyCount: 4, allyCount: 4, enemyHeroes: ['zhongli', 'yelan', 'keqing', 'ningguang'], turnOrder: ['main', 'ally1', 'ally2', 'ally3', 'zhongli', 'yelan', 'keqing', 'ningguang'], bannedHeroes: ['zhongli', 'yelan', 'keqing', 'ningguang'] },
-  { id: 18, name: '古闻之章·第二幕 钟离二',     enemyCount: 4, allyCount: 4, enemyHeroes: ['zhongli', 'hutao', 'ganyu', 'shenhe'],  turnOrder: ['zhongli', 'main', 'ally1', 'ally2', 'ally3', 'hutao', 'ganyu', 'shenhe'], bannedHeroes: ['zhongli', 'hutao', 'ganyu', 'shenhe'] },
-  { id: 19, name: '古闻之章·第三幕 钟离三',     enemyCount: 4, allyCount: 4, enemyHeroes: ['zhongli', 'xiao', 'zibai', 'venti'],    turnOrder: ['zibai', 'xiao', 'main', 'ally1', 'ally2', 'ally3', 'venti', 'zhongli'], bannedHeroes: ['zhongli', 'xiao', 'zibai', 'venti'] },
+  { id: 9,  name: '金翅鹏王之章·第一幕 魈',    enemyCount: 1, allyCount: 1, enemyHeroes: ['xiao'],                           turnOrder: ['main', 'xiao'],                                    bannedHeroes: ['xiao'] },
+  { id: 10,  name: '玑衡仪之章·第一幕 凝光',    enemyCount: 2, allyCount: 3, enemyHeroes: ['ningguang', 'jean'],                turnOrder: ['main', 'ally1', 'ally2', 'ningguang', 'jean'],      bannedHeroes: ['ningguang', 'jean'] },
+  { id: 11, name: '金紫定垂之章·第一幕 刻晴',  enemyCount: 2, allyCount: 3, enemyHeroes: ['keqing', 'ningguang'],             turnOrder: ['main', 'ally1', 'ally2', 'keqing', 'ningguang'],    bannedHeroes: ['keqing', 'ningguang'] },
+  { id: 12, name: '引蝶之章·第一幕 胡桃',       enemyCount: 3, allyCount: 3, enemyHeroes: ['hutao', 'kaeya', 'diluc'],        turnOrder: ['main', 'ally1', 'ally2', 'hutao', 'kaeya', 'diluc'], bannedHeroes: ['hutao', 'kaeya', 'diluc'] },
+  { id: 13, name: '幽客之章·第一幕 夜兰',       enemyCount: 3, allyCount: 3, enemyHeroes: ['ningguang', 'keqing', 'yelan'],   turnOrder: ['yelan', 'main', 'ally1', 'ally2', 'ningguang', 'keqing'], bannedHeroes: ['ningguang', 'keqing', 'yelan'] },
+  { id: 14, name: '仙麟之章·第一幕 甘雨',       enemyCount: 2, allyCount: 2, enemyHeroes: ['ganyu', 'xiao'],                  turnOrder: ['xiao', 'main', 'ally1', 'ganyu'],                    bannedHeroes: ['ganyu', 'xiao'] },
+  { id: 15, name: '愁疏之章·第一幕 申鹤',       enemyCount: 2, allyCount: 2, enemyHeroes: ['ganyu', 'shenhe'],               turnOrder: ['shenhe', 'main', 'ally1', 'ganyu'],                  bannedHeroes: ['ganyu', 'shenhe'] },
+  { id: 16, name: '白驹之章·第一幕 兹白一',     enemyCount: 3, allyCount: 3, enemyHeroes: ['ganyu', 'keqing', 'zibai'],      turnOrder: ['zibai', 'main', 'ally1', 'ally2', 'ganyu', 'keqing'], bannedHeroes: ['ganyu', 'shenhe'] },
+  { id: 17, name: '白驹之章·第二幕 兹白二',     enemyCount: 3, allyCount: 3, enemyHeroes: ['hutao', 'shenhe', 'zibai'],      turnOrder: ['zibai', 'main', 'ally1', 'ally2', 'hutao', 'shenhe'], bannedHeroes: ['hutao', 'shenhe', 'zibai'] },
+  { id: 18, name: '古闻之章·第一幕 钟离一',     enemyCount: 4, allyCount: 4, enemyHeroes: ['zhongli', 'yelan', 'keqing', 'ningguang'], turnOrder: ['main', 'ally1', 'ally2', 'ally3', 'zhongli', 'yelan', 'keqing', 'ningguang'], bannedHeroes: ['zhongli', 'yelan', 'keqing', 'ningguang'] },
+  { id: 19, name: '古闻之章·第二幕 钟离二',     enemyCount: 4, allyCount: 4, enemyHeroes: ['hutao', 'ganyu', 'shenhe', 'zhongli'],  turnOrder: ['zhongli', 'main', 'ally1', 'ally2', 'ally3', 'hutao', 'ganyu', 'shenhe'], bannedHeroes: ['hutao', 'ganyu', 'shenhe', 'zhongli'] },
+  { id: 20, name: '古闻之章·第三幕 钟离三',     enemyCount: 4, allyCount: 4, enemyHeroes: ['venti', 'zhongli', 'zibai', 'xiao'],    turnOrder: ['zibai', 'xiao', 'main', 'ally1', 'ally2', 'ally3', 'venti', 'zhongli'], bannedHeroes: ['venti', 'zhongli', 'zibai', 'xiao'] },
+];
+
+// --- 稻妻 (21-35关) ---
+const INAZUMA_LEVELS: PVELevel[] = [
+  { id: 21, name: '枫红之章·第一幕 枫原万叶',     enemyCount: 1, allyCount: 1, enemyHeroes: ['kazuha'],                          turnOrder: ['kazuha', 'main'],                                    bannedHeroes: ['kazuha'] },
+  { id: 22, name: '雪鹤之章·第一幕 神里绫华一',   enemyCount: 1, allyCount: 1, enemyHeroes: ['ayaka'],                           turnOrder: ['ayaka', 'main'],                                     bannedHeroes: ['ayaka'] },
+  { id: 23, name: '雪鹤之章·第二幕 神里绫华二',   enemyCount: 3, allyCount: 3, enemyHeroes: ['kazuha', 'shenhe', 'ayaka'],        turnOrder: ['ayaka', 'main', 'ally1', 'ally2', 'kazuha', 'shenhe'], bannedHeroes: ['kazuha', 'shenhe', 'ayaka'] },
+  { id: 24, name: '琉金之章·第一幕 宵宫一',       enemyCount: 3, allyCount: 3, enemyHeroes: ['kazuha', 'ayaka', 'yoimiya'],       turnOrder: ['yoimiya', 'main', 'ally1', 'ally2', 'kazuha', 'ayaka'], bannedHeroes: ['kazuha', 'ayaka', 'yoimiya'] },
+  { id: 25, name: '琉金之章·第二幕 宵宫二',       enemyCount: 3, allyCount: 3, enemyHeroes: ['yoimiya', 'klee', 'hutao'],         turnOrder: ['hutao', 'main', 'ally1', 'ally2', 'yoimiya', 'klee'], bannedHeroes: ['yoimiya', 'klee', 'hutao'] },
+  { id: 26, name: '眠龙之章·第一幕 珊瑚宫心海一', enemyCount: 3, allyCount: 3, enemyHeroes: ['yoimiya', 'kazuha', 'kokomi'],      turnOrder: ['kokomi', 'main', 'ally1', 'ally2', 'yoimiya', 'kazuha'], bannedHeroes: ['yoimiya', 'kazuha', 'kokomi'] },
+  { id: 27, name: '眠龙之章·第二幕 珊瑚宫心海二', enemyCount: 3, allyCount: 3, enemyHeroes: ['ayaka', 'yoimiya', 'kokomi'],       turnOrder: ['yoimiya', 'main', 'ally1', 'ally2', 'ayaka', 'kokomi'], bannedHeroes: ['ayaka', 'yoimiya', 'kokomi'] },
+  { id: 28, name: '神守柏之章·第一幕 神里绫人一', enemyCount: 3, allyCount: 3, enemyHeroes: ['kokomi', 'ayato', 'ayaka'],         turnOrder: ['ayato', 'main', 'ally1', 'ally2', 'kokomi', 'ayaka'],  bannedHeroes: ['kokomi', 'ayato', 'ayaka'] },
+  { id: 29, name: '神守柏之章·第二幕 神里绫人二', enemyCount: 3, allyCount: 3, enemyHeroes: ['ayato', 'kazuha', 'xiao'],          turnOrder: ['ayato', 'main', 'ally1', 'ally2', 'kazuha', 'xiao'],   bannedHeroes: ['ayato', 'kazuha', 'xiao'] },
+  { id: 30, name: '天牛之章·第一幕 荒泷一斗',     enemyCount: 3, allyCount: 3, enemyHeroes: ['yelan', 'klee', 'itto'],            turnOrder: ['itto', 'main', 'ally1', 'ally2', 'yelan', 'klee'],     bannedHeroes: ['yelan', 'klee', 'itto'] },
+  { id: 31, name: '仙狐之章·第一幕 八重神子一',   enemyCount: 3, allyCount: 3, enemyHeroes: ['kokomi', 'kazuha', 'yae'],          turnOrder: ['yae', 'main', 'ally1', 'ally2', 'kokomi', 'kazuha'],   bannedHeroes: ['kokomi', 'kazuha', 'yae'] },
+  { id: 32, name: '仙狐之章·第二幕 八重神子二',   enemyCount: 4, allyCount: 4, enemyHeroes: ['yae', 'ningguang', 'yelan', 'jean'],turnOrder: ['yae', 'main', 'ally1', 'ally2', 'ally3', 'ningguang', 'yelan', 'jean'], bannedHeroes: ['yae', 'ningguang', 'yelan', 'jean'] },
+  { id: 33, name: '天下人之章·第一幕 雷电将军一', enemyCount: 4, allyCount: 4, enemyHeroes: ['kokomi', 'yoimiya', 'kazuha', 'raiden'], turnOrder: ['raiden', 'main', 'ally1', 'ally2', 'ally3', 'kokomi', 'yoimiya', 'kazuha'], bannedHeroes: ['kokomi', 'yoimiya', 'kazuha', 'raiden'] },
+  { id: 34, name: '天下人之章·第二幕 雷电将军二', enemyCount: 4, allyCount: 4, enemyHeroes: ['raiden', 'yae', 'ayato', 'ayaka'], turnOrder: ['ayato', 'main', 'ally1', 'ally2', 'ally3', 'raiden', 'yae', 'ayaka'], bannedHeroes: ['raiden', 'yae', 'ayato', 'ayaka'] },
+  { id: 35, name: '天下人之章·第三幕 雷电将军三', enemyCount: 4, allyCount: 4, enemyHeroes: ['raiden', 'yae', 'zhongli', 'venti'], turnOrder: ['raiden', 'main', 'ally1', 'ally2', 'ally3', 'yae', 'zhongli', 'venti'], bannedHeroes: ['raiden', 'yae', 'zhongli', 'venti'] },
 ];
 
 // ======================== 章节定义 ========================
@@ -191,8 +238,7 @@ export const CHAPTERS: PVEChapter[] = [
     cssClass: 'inazuma',
     desc: '永恒之国，雷与樱之岛',
     requiredLevel: 7,
-    levels: [],
-    placeholder: true,
+    levels: INAZUMA_LEVELS,
   },
   {
     id: 'sumeru',

@@ -10,6 +10,7 @@ import { isSlash } from './Card';
 import { getRoleChineseName } from './Player';
 import { DeckManager } from './DeckManager';
 import { EventBus } from './EventBus';
+import { VoiceManager } from '../audio/VoiceManager';
 
 export class DamageSystem {
   private deck: DeckManager;
@@ -20,9 +21,11 @@ export class DamageSystem {
 
   // 外部依赖注入
   public equipBeforeDamageHandler: ((target: PlayerState, damage: { value: number }, sourceCard: Card | null) => void) | null = null;
-  public equipOnResponseHandler: ((target: PlayerState, cardName: string, sourceCard: Card | null, source: PlayerState | null) => boolean) | null = null;
+  public equipOnResponseHandler: ((target: PlayerState, cardName: string, sourceCard: Card | null, source: PlayerState | null) => Promise<boolean>) | null = null;
   public shouldIgnoreArmorHandler: ((source: PlayerState) => boolean) | null = null;
   public zhanBaHandler: ((player: PlayerState, isActive: boolean) => Card | null) | null = null;
+  /** 娜维娅-刺玫：伤害恒为1 */
+  public naviaRoseHandler: ((target: PlayerState, damageRef: { value: number }) => void) | null = null;
   /** 铁索连环传导回调：在造成属性伤害后触发 */
   public onTransmitChain: ((target: PlayerState, damage: number, sourceCard: Card | null, source: PlayerState | null) => Promise<void>) | null = null;
   /** 击杀回调：用于经验统计 */
@@ -40,14 +43,15 @@ export class DamageSystem {
     getFireDamageBonus: (source: PlayerState) => number;
     onJadeProtect: (player: PlayerState, damage: number) => number;
     onDehyaMercenaryProtect: (target: PlayerState, damage: number) => { protect: boolean; damage: number };
-    onDealingDamage: (source: PlayerState, target: PlayerState, damage: number) => Promise<{ intercepted: boolean; data?: any }>;
+    onDealingDamage: (source: PlayerState, target: PlayerState, damage: number, sourceCard: Card | null) => Promise<{ intercepted: boolean; data?: any }>;
     tryUseMarkerAsWine: (playerId: number) => boolean;
     onHealthLoss: (player: PlayerState, amount: number, sourceName: string) => void;
     isYelanDamageHealthLoss: (source: PlayerState) => boolean;
     getFrostMoonOwner: () => PlayerState | null;
     onFrostMoonRedirect: (target: PlayerState, damage: number, source: PlayerState | null) => { redirected: boolean; newTarget: PlayerState };
-    onAfterCardPlay: (player: PlayerState) => Promise<void>;
+    onAfterCardPlay: (player: PlayerState, card?: Card) => Promise<void>;
     checkFrostMark: (target: PlayerState, sourceCard: Card | null) => number;
+    isImmuneToFire: (player: PlayerState) => boolean;
   } | null = null;
 
   constructor(
@@ -78,11 +82,21 @@ export class DamageSystem {
     if (amount < 0) {
       // 夜兰-络命：造成伤害视为体力流失
       if (source && this.skillManager && this.skillManager.isYelanDamageHealthLoss(source)) {
+        VoiceManager.getInstance().playSkillVoice('yelan', '络命', source.id);
         await this.applyHealthLoss(target, Math.abs(amount), source.name);
         return;
       }
 
       let positiveDamage = Math.abs(amount);
+
+      // 宵宫-琉金：免疫火属性伤害
+      if (sourceCard && sourceCard.element === 'Pyro' && this.skillManager?.isImmuneToFire(target)) {
+        this.eventBus.emit(GameEvent.Log, {
+          message: `【琉金】${target.name} 免疫火属性伤害！`
+        });
+        VoiceManager.getInstance().playSkillVoice('yoimiya', '琉金', target.id);
+        return; // 不受到火属性伤害
+      }
 
       // 火属性伤害加成（玛薇卡-战争）
       if (sourceCard && sourceCard.element === 'Pyro' && source && this.skillManager) {
@@ -105,7 +119,7 @@ export class DamageSystem {
 
       // 伤害计算钩子（胡桃-幽蝶, 雷电将军-无想等）
       if (source && this.skillManager) {
-        const dealResult = await this.skillManager.onDealingDamage(source, target, positiveDamage);
+        const dealResult = await this.skillManager.onDealingDamage(source, target, positiveDamage, sourceCard);
         if (dealResult.intercepted) return; // 防止伤害（如无想蓄力）
         if (dealResult.data?.damage !== undefined) {
           positiveDamage = dealResult.data.damage;
@@ -143,6 +157,13 @@ export class DamageSystem {
         }
       }
 
+      // 娜维娅-刺玫：受到的伤害恒为1
+      if (this.naviaRoseHandler && target.heroId === 'navia') {
+        const damageRef = { value: positiveDamage };
+        this.naviaRoseHandler(target, damageRef);
+        positiveDamage = damageRef.value;
+      }
+
       // 防具前置修正（藤甲/白银狮子）
       if (this.equipBeforeDamageHandler) {
         const damageRef = { value: positiveDamage };
@@ -172,6 +193,11 @@ export class DamageSystem {
       // 玛薇卡-圣火：火杀造成伤害后回血
       if (sourceCard && sourceCard.element === 'Pyro' && source && this.skillManager) {
         this.skillManager.onHolyFireDamage(source);
+      }
+
+      // 赛诺-风纪：杀造成伤害后可弃置目标装备区一张牌
+      if (source && isChainedTransmission === false && sourceCard && isSlash(sourceCard) && (this.skillManager as any)?.cynoDisciplineOnDamage) {
+        await (this.skillManager as any).cynoDisciplineOnDamage(source, target);
       }
 
       // 基尼奇-阿乔：造成火属性伤害后可令角色进入连环
@@ -278,6 +304,15 @@ export class DamageSystem {
     source: PlayerState | null
   ): Promise<void> {
     this.eventBus.emit(GameEvent.PlayerDying, { playerId: dyingPlayer.id });
+
+    // 菲林斯-灯妖：若source有灯妖激活，濒死立即阵亡（跳过求桃）
+    if (source && (this.skillManager as any)?.isPhilinsLanternActive?.(source)) {
+      this.eventBus.emit(GameEvent.Log, { message: `【灯妖】${source.name} 使 ${dyingPlayer.name} 立即阵亡（跳过求桃）！` });
+      VoiceManager.getInstance().playSkillVoice('philins', '灯妖', source.id);
+      this.executeDeath(dyingPlayer, source);
+      return;
+    }
+
     this.eventBus.emit(GameEvent.Log, { message: `[濒死] ${dyingPlayer.name} 正在寻求救援...` });
 
     // 技能钩子：濒死触发（芙宁娜-罪舞、胡桃-往生）
@@ -380,6 +415,13 @@ export class DamageSystem {
       this.onKill(killer, victim);
     }
 
+    // 菲林斯-长茔：角色死亡时额外摸2张牌
+    for (const p of this.allPlayers) {
+      if (!p.isDead && p.heroId === 'philins' && p !== victim) {
+        (this.skillManager as any)?.philinsGraveOnDeath?.(p);
+      }
+    }
+
     this.eventBus.emit(GameEvent.PlayerDied, {
       playerId: victim.id,
       role: victim.role
@@ -449,6 +491,14 @@ export class DamageSystem {
         this.eventBus.emit(GameEvent.Log, { message: `🟢 ${killer.name} 击杀了反贼 ${victim.name}！奖励：摸3张牌！` });
         this.deck.drawCards(killer, 3);
       }
+
+      // PVE模式：击杀任何敌方/友方角色均摸3张牌（无身份奖惩区分）
+      const kFaction = (killer as any).faction as string | undefined;
+      const vFaction = (victim as any).faction as string | undefined;
+      if (kFaction && vFaction && victim.role === RoleType.None) {
+        this.eventBus.emit(GameEvent.Log, { message: `🟢 ${killer.name} 击杀了 ${victim.name}！奖励：摸3张牌！` });
+        this.deck.drawCards(killer, 3);
+      }
     }
 
     // 检查游戏胜负
@@ -472,7 +522,7 @@ export class DamageSystem {
     const ignoreArmor = source && cardName === '闪' && this.shouldIgnoreArmorHandler?.(source);
 
     if (!ignoreArmor) {
-      if (this.equipOnResponseHandler?.(target, cardName, sourceCard, source)) {
+      if (await this.equipOnResponseHandler?.(target, cardName, sourceCard, source)) {
         return null; // 防具已代替响应（返回null因为不需要选牌，上层用true判断）
       }
     }
@@ -482,12 +532,15 @@ export class DamageSystem {
     const canZhanBa = cardName === '杀' && targetWeapon?.name === '丈八蛇矛' && target.handCards.length >= 2;
 
     // 通过 driver 让玩家/AI 选择
+    // 妮露水环/水月：ctx里传递当前stance供promptResponse使用
+    const nilouData = this.skillManager?.getData?.(target.id);
     const response = await driver.promptResponse(target, cardName, {
       players: this.allPlayers,
       roundCount: 0,
       currentTurn: 0,
       currentPlayerId: target.id,
       gameOverWinner: null,
+      nilouStance: nilouData?.nilouStance || undefined,
       drawPileCount: this.deck.drawPileCount,
       discardPileCount: this.deck.discardPile.length,
       dyingPlayerId: extraCtx?.dyingPlayerId,
@@ -510,6 +563,12 @@ export class DamageSystem {
       this.eventBus.emit(GameEvent.Log, {
         message: `${target.name} 打出了【${response.name}】${suitSym}${numText}`
       });
+
+      // 妮露-水环：黑色牌当闪使用时触发语音
+      if (target.heroId === 'nilou' && cardName === '闪' &&
+          (response.suit === 'Spade' || response.suit === 'Club')) {
+        VoiceManager.getInstance().playSkillVoice('nilou', '水环', target.id);
+      }
 
       this.eventBus.emit(GameEvent.CardResponded, {
         playerId: target.id,

@@ -186,6 +186,19 @@ class SocketManager {
     this.eventHandlers.get(event)?.delete(handler);
   }
 
+  /** 清除本局游戏相关的所有本地监听器（game_event, prompt, game_start, game_over等），防止下局数据残留 */
+  removeGameListeners(): void {
+    const gameEvents = ['game_event', 'prompt', 'game_start', 'game_over',
+      'hero_select_start', 'hero_select_result', 'hero_select_waiting', 'hero_select_monarch_picked'];
+    for (const event of gameEvents) {
+      const handlers = this.eventHandlers.get(event);
+      if (handlers) {
+        console.log(`[SocketManager] 清除 ${event} 监听器: ${handlers.size} 个`);
+        handlers.clear();
+      }
+    }
+  }
+
   /** 注册重连回调 */
   onReconnect(cb: () => void): () => void {
     this.reconnectCallbacks.push(cb);
@@ -203,8 +216,11 @@ class SocketManager {
   private emitLocal(event: string, data?: any): void {
     const handlers = this.eventHandlers.get(event);
     const count = handlers?.size || 0;
-    console.log(`[SocketManager] emitLocal("${event}") → 已注册处理器: ${count}`);
-    if (count === 0) {
+    // 仅对关键事件打日志
+    if (['game_start', 'game_over', 'hero_select_start', 'hero_select_result', 'select_hero', 'select_monarch_hero'].includes(event)) {
+      console.log(`[SocketManager] emitLocal("${event}") → handler数: ${count}`, data ? JSON.stringify(data).substring(0, 200) : '');
+    }
+    if (count === 0 && event !== 'game_event') {
       console.warn(`[SocketManager] ⚠ 没有处理器监听 "${event}" 事件！`);
     }
     if (handlers) {

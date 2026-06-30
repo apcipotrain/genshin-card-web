@@ -603,6 +603,22 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ---------- PVE 星级同步 ----------
+  socket.on('save_pve_stars', (data: { stars: Record<number, number> }, ack?: (result: any) => void) => {
+    const token = socketToToken.get(socket.id);
+    if (!token) { ack?.({ success: false, reason: '未登录' }); return; }
+    const ok = accountManager.savePVEStars(token, data.stars);
+    ack?.({ success: ok });
+  });
+
+  // ---------- 设置同步（BGM/语音/AI速度） ----------
+  socket.on('save_settings', (data: Record<string, any>, ack?: (result: any) => void) => {
+    const token = socketToToken.get(socket.id);
+    if (!token) { ack?.({ success: false, reason: '未登录' }); return; }
+    const ok = accountManager.saveSettings(token, data);
+    ack?.({ success: ok });
+  });
+
   // ---------- 断线 ----------
 
   socket.on('disconnect', () => {
@@ -644,11 +660,14 @@ io.on('connection', (socket) => {
 /** 检查是否所有真人已选好武将，若是则统一启动游戏 */
 function checkAllSelectedAndStart(roomId: string, _token: string): void {
   const room = roomManager.getRoom(roomId);
-  if (!room) return;
+  if (!room) { console.log('[DEBUG:select] room not found:', roomId); return; }
 
   const realSlots = room.slots.filter(s => s.token !== null);
+  const selectedSlots = realSlots.filter(s => s.heroId);
+  const heroSummary = realSlots.map(s => `${s.accountName || '?'}:${s.heroId || 'none'}`).join(',');
+  console.log(`[DEBUG:select] room=${roomId} slots=${realSlots.length} selected=${selectedSlots.length} heroes=[${heroSummary}]`);
   const allSelected = realSlots.every(s => s.heroId);
-  if (!allSelected) return;
+  if (!allSelected) { console.log('[DEBUG:select] NOT all selected, waiting...'); return; }
 
   const selectState = heroSelectState.get(roomId);
   if (!selectState) {
@@ -733,6 +752,7 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
     }
 
     // 通知每个真人玩家游戏开始（按视角脱敏发送玩家列表）
+    console.log(`[DEBUG:game_start] 准备发送game_start，room=${roomId}, slots=${room.slots.length}, gameHost已创建`);
     for (const slot of room.slots) {
       if (slot.token) {
         const socketId = tokenToSocket.get(slot.token);

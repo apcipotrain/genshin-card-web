@@ -31,6 +31,9 @@ export class AIDriver implements IPlayerDriver {
     const me = this.getMe(ctx);
     if (me.isDead || me.handCards.length === 0) return -1;
 
+    // 瓦雷莎策略：手牌不足20张时不主动出牌，攒到20张再爆发
+    if (me.heroId === 'varesa' && me.handCards.length < 20) return -1;
+
     // AI 出牌优先级策略
     const sorted = this.sortCardsByPriority(me, ctx);
     if (sorted.length === 0) return -1;
@@ -41,18 +44,17 @@ export class AIDriver implements IPlayerDriver {
     return idx >= 0 ? idx : -1;
   }
 
-  /** 获取手牌中除了指定名称外的最高优先级牌索引（用于跳过失败牌） */
-  getNextBestCardIndex(state: PlayerState, ctx: GameContextSnapshot, excludeName: string): number {
+  /** 获取手牌中排除指定牌ID后的最高优先级牌索引（用于跳过失败牌） */
+  getNextBestCardIndex(state: PlayerState, ctx: GameContextSnapshot, excludeIds: Set<number>): number {
     const me = this.getMe(ctx);
-    const sorted = this.sortCardsByPriority(me, ctx);
-    const filtered = sorted.filter(c => c.name !== excludeName);
-    if (filtered.length === 0) return -1;
-    const bestCard = filtered[0];
+    const sorted = this.sortCardsByPriority(me, ctx, excludeIds);
+    if (sorted.length === 0) return -1;
+    const bestCard = sorted[0];
     const idx = me.handCards.indexOf(bestCard);
     return idx >= 0 ? idx : -1;
   }
 
-  private sortCardsByPriority(me: PlayerState, ctx: GameContextSnapshot): Card[] {
+  private sortCardsByPriority(me: PlayerState, ctx: GameContextSnapshot, excludeIds?: Set<number>): Card[] {
     const cards = [...me.handCards];
     const enemies = this.getEnemies(me, ctx);
     const allies = this.getAllies(me, ctx);
@@ -63,8 +65,12 @@ export class AIDriver implements IPlayerDriver {
       score: this.scoreCard(card, me, ctx, enemies, allies)
     }));
 
-    // 过滤掉分值为0的牌（不能打出的）
-    const playable = scored.filter(s => s.score > 0);
+    // 过滤掉分值为0的牌 + 本回合已失败的牌（按ID）
+    const playable = scored.filter(s => {
+      if (s.score <= 0) return false;
+      if (excludeIds && excludeIds.has(s.card.id)) return false;
+      return true;
+    });
     // 按分值降序排列
     playable.sort((a, b) => b.score - a.score);
 
@@ -87,7 +93,8 @@ export class AIDriver implements IPlayerDriver {
         return me.hp < me.maxHp ? 100 : 0;
       // 酒：每回合限一次（用 wineUsedThisTurn 而非 nextSlashDamageBonus，避免杀消耗后误判可再出）
       case '酒':
-        if (me.wineUsedThisTurn) return 0;
+        // 已喝过酒 或 酒的伤害加成还未用掉 → 不能再喝酒
+        if (me.wineUsedThisTurn || me.nextSlashDamageBonus > 0) return 0;
         const hasSlash = me.handCards.some(c => isSlash(c) && c !== card);
         return hasSlash ? 75 : (me.hp <= 1 ? 80 : 30);
       // 无中生有：几乎必用
@@ -168,6 +175,16 @@ export class AIDriver implements IPlayerDriver {
         );
         if (weaponHolders.length === 0) return 0;
 
+        // 检查至少有一个武器持有者有射程内的目标（否则executeBorrowWeapon会返回false导致AI循环）
+        const hasValidTarget = weaponHolders.some(wh => {
+          const whRange = getWeaponRange(wh);
+          return ctx.players.some(t =>
+            !t.isDead && t !== wh &&
+            getDistance(wh, t, ctx.players) <= whRange
+          );
+        });
+        if (!hasValidTarget) return 0;
+
         // 检查是否有武器持有者能杀到的目标
         let bestVictimIsEnemy = false;
         const hasValidSetup = weaponHolders.some(wh => {
@@ -242,8 +259,17 @@ export class AIDriver implements IPlayerDriver {
       // 辅助/防御型技能：优先选择盟友（需要帮助的队友）
       const allies = targets.filter(t => !this.isEnemy(me, t) && t.id !== me.id);
       if (allies.length > 0) {
-        // 优先选血量最低的盟友
-        allies.sort((a, b) => a.hp - b.hp);
+        // 祝福：选装备最多的盟友（加成最大）
+        if (reason.includes('祝福')) {
+          allies.sort((a, b) => {
+            const ea = Object.values(a.equipZone).filter(v => v !== null && (v as any)?.name).length;
+            const eb = Object.values(b.equipZone).filter(v => v !== null && (v as any)?.name).length;
+            return eb - ea; // 装备多优先
+          });
+        } else {
+          // 默认选血量最低的盟友
+          allies.sort((a, b) => a.hp - b.hp);
+        }
         return allies[0].id;
       }
       // 没有盟友则在目标中选最需要帮助的
@@ -253,6 +279,28 @@ export class AIDriver implements IPlayerDriver {
 
     // 进攻型技能（或默认）：优先选择敌人
     const enemies = targets.filter(t => this.isEnemy(me, t));
+
+    // 雷电将军-御决特殊处理
+    if (reason.includes('御决-选择发起者') && enemies.length >= 2) {
+      const allies = targets.filter(t => !this.isEnemy(me, t) && t.id !== me.id);
+      const lowHpEnemy = enemies.find(e => e.hp <= 1);
+      if (lowHpEnemy && allies.length > 0) {
+        // 有敌人HP=1，选友方牌最多的发起者
+        const bestAlly = allies.reduce((a, b) => a.handCards.length > b.handCards.length ? a : b);
+        (this as any)._raidenDecreeT1 = bestAlly.id;
+        return bestAlly.id;
+      }
+    }
+    if (reason.includes('御决-选择目标')) {
+      const t1Id = (this as any)._raidenDecreeT1;
+      if (t1Id !== undefined) {
+        delete (this as any)._raidenDecreeT1;
+        // 第一个是友方 → 第二个选HP最低的敌人
+        enemies.sort((a, b) => a.hp - b.hp);
+        return enemies[0].id;
+      }
+    }
+
     if (enemies.length > 0) {
       // 内奸策略：动态平衡 反→忠→反→忠→反→反→主
       if (me.role === RoleType.Traitor) {
@@ -342,6 +390,11 @@ export class AIDriver implements IPlayerDriver {
       '七星',    // 凝光-七星：回复体力
       '契约',    // 钟离-契约：建立保护关系
       '军师',    // 珊瑚宫心海-军师：给牌给队友
+      '代理',    // 琴-代理：与队友交换手牌
+      '咏月',    // 菈乌玛-咏月：目标摸2牌+自回血（给队友）
+      '灵使',    // 菈乌玛-灵使：给霜月标记保护
+      '幽客',    // 夜兰-幽客：查看身份（信息技能，对友方减少敌意）
+      '炼金',    // 阿贝多-炼金：给队友锻造装备
       // 闲游为中性，默认选敌人作为目标交换位置更有战术价值
     ];
     return defensiveReasons.some(r => reason.includes(r));
@@ -358,7 +411,8 @@ export class AIDriver implements IPlayerDriver {
 
     // 花色响应（火攻用）
     if (cardName.startsWith('花色:')) {
-      const suit = cardName.split(':')[1];
+      const parts = cardName.split(':');
+      const suit = parts[2] || parts[1]; // 格式: 花色:♥:Heart
       const matched = me.handCards.find(c => c.suit === suit);
       return matched ?? null;
     }
@@ -733,6 +787,14 @@ export class AIDriver implements IPlayerDriver {
   // ======================== 阵营判定辅助 ========================
 
   private isEnemy(me: PlayerState, other: PlayerState): boolean {
+    // PVE模式：基于阵营（faction）判定敌友
+    const myFaction = (me as any).faction as string | undefined;
+    const otherFaction = (other as any).faction as string | undefined;
+    if (myFaction && otherFaction) {
+      return myFaction !== otherFaction;
+    }
+
+    // PVP模式：基于身份（role）判定敌友
     if (me.role === RoleType.None || other.role === RoleType.None) return true;
 
     // 主公视角：反贼和内奸是敌人
@@ -773,11 +835,11 @@ export class AIDriver implements IPlayerDriver {
     if (question.includes('吟游') && question.includes('自救')) {
       return true;
     }
-    // 雷电将军-无想：防止伤害积累标记（标记>=3时释放伤害）
+    // 雷电将军-无想：标记>=2时不发动，直接造成伤害
     if (question.includes('无想') && question.includes('防止')) {
       const match = question.match(/当前标记：(\d+)枚/);
       const marks = match ? parseInt(match[1]) : 0;
-      if (marks >= 3) return false; // 标记达到上限，释放伤害
+      if (marks >= 2) return false; // 标记达到2枚，不再防止，直接造成伤害
       return true; // 优先积累标记
     }
     // 纳西妲-囚笼：双倍锦囊
@@ -788,8 +850,11 @@ export class AIDriver implements IPlayerDriver {
     if (question.includes('少女')) {
       if (this.lastCtx) {
         const me = this.lastCtx.players.find(p => p.id === this.playerId);
-        if (me && me.hp <= 2) {
-          // 血量低时不再减少体力上限
+        if (me) {
+          // 不是满血 → 发动；血量上限为2 → 发动；满血且上限>2 → 不发动
+          const notFullHp = me.hp < me.maxHp;
+          const lowMaxHp = me.maxHp <= 2;
+          if (notFullHp || lowMaxHp) return true;
           return false;
         }
       }
@@ -798,6 +863,10 @@ export class AIDriver implements IPlayerDriver {
     // 哥伦比娅-月神：摸牌加成
     if (question.includes('月神')) {
       return true; // 总是发动
+    }
+    // 哥伦比娅-少女免疫锦囊：有标记时总是移去（保护自己）
+    if (question.includes('空月') && question.includes('锦囊')) {
+      return true; // 总是移去标记令锦囊无效
     }
     // 艾尔海森-代贤：双无懈后回收锦囊
     if (question.includes('代贤')) {
@@ -844,6 +913,82 @@ export class AIDriver implements IPlayerDriver {
     // 欧洛伦-庇笛：不要每张牌都转闪电，控制频率（约30%概率）
     if (question.includes('庇笛') && question.includes('闪电')) {
       return Math.random() < 0.3;
+    }
+    // 朱雀羽扇：普通杀转火杀，总是发动（火杀不怕藤甲且可触发火伤加成）
+    if (question.includes('朱雀羽扇') && question.includes('火杀')) {
+      return true;
+    }
+    // 迪卢克-晨曦：未达标记上限2且手牌非空时继续扣置
+    if (question.includes('晨曦') && question.includes('扣置')) {
+      if (this.lastCtx) {
+        const me = this.lastCtx.players.find(p => p.id === this.playerId);
+        if (me) return me.handCards.length > 0;
+      }
+      return true;
+    }
+    // 迪卢克-夜枭：确认发动（evaluateSkill已过滤）
+    if (question.includes('夜枭') && question.includes('弃置')) {
+      return true;
+    }
+    // 凯亚-午后：确认发动（evaluateSkill已过滤）
+    if (question.includes('午后') && question.includes('选择')) {
+      return true;
+    }
+    // 凝光-璇玑：AI不发动（璇玑是无收益信息操作）
+    if (question.includes('璇玑')) {
+      return false;
+    }
+    // 申鹤-劈观：总是施加冰翎标记（对方需2张闪抵消杀）
+    if (question.includes('劈观') && question.includes('冰翎')) {
+      return true;
+    }
+    // 宵宫-夏祭：有红桃牌且有敌人时挂烟花
+    if (question.includes('夏祭') && question.includes('烟花')) {
+      return true;
+    }
+    // 玛薇卡-圣火：普通杀转火杀总是有利
+    if (question.includes('圣火') && question.includes('火杀')) {
+      return true;
+    }
+    // 法尔伽-北风：有敌人时弃牌令杀不计次数
+    if (question.includes('北风') && question.includes('不计入')) {
+      return true;
+    }
+    // 提纳里-巡林：回合开始时观看牌堆顶8张牌
+    if (question.includes('巡林') && question.includes('8张')) {
+      return true;
+    }
+    // 提纳里-生论：使用桃时额外指定友方
+    if (question.includes('生论') && question.includes('额外')) {
+      return true;
+    }
+    // 赛诺-风纪：杀造成伤害后弃置目标装备
+    if (question.includes('风纪') && question.includes('弃置')) {
+      return true;
+    }
+    // 哥伦比娅-空月：有标记时总是移去令锦囊无效
+    if (question.includes('空月') && question.includes('锦囊')) {
+      return true;
+    }
+    // 哥伦比娅-空月：五谷丰登跳过
+    if (question.includes('空月') && question.includes('五谷丰登')) {
+      return true;
+    }
+    // 恰斯卡-调停：有杀时标记敌人
+    if (question.includes('调停') && question.includes('标记')) {
+      return true;
+    }
+    // 神里绫人-家主：与敌人拼点
+    if (question.includes('家主') && question.includes('拼点')) {
+      return true;
+    }
+    // 娜维娅-说服：继续选牌交给他人（AI跳过，直接选一张给队友）
+    if (question.includes('说服') && question.includes('继续选牌')) {
+      return false;
+    }
+    // 克洛琳德-剧团：永远不发动
+    if (question.includes('剧团')) {
+      return false;
     }
     // 默认：总是发动有利技能
     return true;
@@ -905,8 +1050,9 @@ export class AIDriver implements IPlayerDriver {
         return this.evaluateYaeCharm(me, ctx, enemies);
 
       // ======================== 希诺宁-工匠 ========================
+      // ======================== 希诺宁-工匠（AI不发动） ========================
       case 'xilonen_craft':
-        return this.evaluateXilonenCraft(me, ctx, enemies, allies);
+        return false; // AI不发动工匠
 
       // ======================== 希诺宁-祝福 ========================
       case 'xilonen_blessing':
@@ -923,7 +1069,8 @@ export class AIDriver implements IPlayerDriver {
 
       // ======================== 雷电将军-御决 ========================
       case 'raiden_decree':
-        return enemies.length >= 2; // 有至少2个敌人时发动
+        // 有≥2个敌人时发动；若有敌人HP=1，优先让我方牌最多的角色与之决斗
+        return enemies.length >= 2;
 
       // ======================== 纳西妲-比喻 ========================
       case 'nahida_metaphor':
@@ -944,34 +1091,55 @@ export class AIDriver implements IPlayerDriver {
         return basicCount >= 2 && enemies.length > 0;
 
       // ======================== 宵宫-夏祭 ========================
-      case 'yoimiya_firework':
-        // 有红桃牌且有敌人时挂烟花
-        return me.handCards.some(c => c.suit === SuitType.Heart) && enemies.length > 0;
+      case 'yoimiya_firework': {
+        // 回合结束前，为每个敌方角色挂烟花，直到没有红桃牌
+        const hearts = me.handCards.filter(c => c.suit === SuitType.Heart);
+        return hearts.length > 0 && enemies.length > 0;
+      }
 
       // ======================== 莱欧斯利-公爵 ========================
       case 'wriothesley_duke':
-        // 有黑色手牌且有敌人
+        // 回合结束前发动，有黑色手牌且有敌人
         return me.handCards.some(c =>
           c.suit === SuitType.Spade || c.suit === SuitType.Club
         ) && enemies.length > 0;
 
       // ======================== 胡桃-幽蝶 ========================
       case 'hutao_butterfly':
-        return me.hp >= 3 && enemies.length > 0; // HP>=3且有敌人才用
+        return me.hp < 4 && enemies.length > 0; // HP<4时回合开始发动
 
       // ======================== 凝光-七星 ========================
-      case 'ningguang_stars':
-        // 限定技：只在己方有成员HP严重不足（≤1）时才发动
-        const criticalAlly = allies.find(a => a.hp <= 1);
-        return criticalAlly !== undefined || me.hp <= 1;
+      case 'ningguang_stars': {
+        // 限定技：有队友且自己或队友血量不满时发动
+        if (allies.length === 0) return false;
+        const needHealAlly = allies.some(a => a.hp < a.maxHp);
+        return me.hp < me.maxHp || needHealAlly;
+      }
 
       // ======================== 凝光-天权 ========================
       case 'ningguang_heaven':
+        // 有敌人时发动天权（AI会通过promptTarget自动选择敌人作为目标）
         return enemies.length > 0;
+
+      // ======================== 欧洛伦-残魂 ========================
+      case 'olorun_soul':
+        // 体力值>2时发动，选择任意已阵亡角色的被动技能
+        return me.hp > 2;
+
+      // ======================== 欧洛伦-庇笛（回合结束前） ========================
+      case 'olorun_flute':
+        // 有手牌即可发动，当闪电用
+        return me.handCards.length > 0;
+
+      // ======================== 玛拉妮-流泉 ========================
+      case 'mualani_spring':
+        // 回合结束前如果还有手牌就发动
+        return me.handCards.length > 0;
 
       // ======================== 艾尔海森-知论 ========================
       case 'alhaitham_knowledge':
-        return me.handCards.length >= 3; // 手牌多时扣置
+        // 回合结束前发动，存无懈可击，上限2张
+        return true; // 总是发动
 
       // ======================== 夜兰-幽客 ========================
       case 'yelan_spy':
@@ -995,17 +1163,24 @@ export class AIDriver implements IPlayerDriver {
 
       // ======================== 迪希雅-佣兵 ========================
       case 'dehya_mercenary':
-        return enemies.length > 0 && me.handCards.length > 0;
+        // 对血量最小的队友发动（保护队友），自己血量需大于队友
+        const lowHpAlly = allies.filter(a => a.hp < me.maxHp).sort((a, b) => a.hp - b.hp);
+        return lowHpAlly.length > 0 && me.handCards.length > 0;
 
       // ======================== 珊瑚宫心海-军师 ========================
-      case 'kokomi_strategist':
-        // 有手牌且有盟友时发动：给牌+桃园结义
-        return me.handCards.length > 0 && allies.length > 0;
+      case 'kokomi_strategist': {
+        // 己方血量不满的角色多于敌方血量不满的角色时才发动
+        const injuredAllies = allies.filter(a => a.hp < a.maxHp).length;
+        const injuredEnemies = enemies.filter(e => e.hp < e.maxHp).length;
+        return me.handCards.length > 0 && injuredAllies > injuredEnemies;
+      }
 
       // ======================== 荒泷一斗-赤鬼 ========================
       case 'ittou_redoni':
-        // 失去1点体力换取1张牌，HP≥2且有手牌需求时值得发动
-        return me.hp >= 2;
+        // ≥3血且手牌<10时发动；≤2血不发；手牌≥10不发
+        if (me.hp <= 2) return false;
+        if (me.handCards.length >= 10) return false;
+        return me.hp >= 3;
 
       // ======================== 魈-降魔 ========================
       case 'xiao_demon_tamer':
@@ -1037,10 +1212,12 @@ export class AIDriver implements IPlayerDriver {
       }
 
       // ======================== 刻晴-七星 ========================
-      case 'keqing_stars':
-        // 限定技：只在己方有成员HP严重不足（≤1）时才发动
-        const criticalKAlly = allies.find(a => a.hp <= 1);
-        return criticalKAlly !== undefined || me.hp <= 1;
+      case 'keqing_stars': {
+        // 限定技：有队友且自己或队友血量不满时发动
+        if (allies.length === 0) return false;
+        const needHealKAlly = allies.some(a => a.hp < a.maxHp);
+        return me.hp < me.maxHp || needHealKAlly;
+      }
 
       // ======================== 奈芙尔-秘闻 ========================
       case 'nefur_secret':
@@ -1056,8 +1233,74 @@ export class AIDriver implements IPlayerDriver {
 
       // ======================== 菈乌玛-灵使 ========================
       case 'lauma_frostmoon':
-        // 有敌人时发动，优先给HP高的友军
-        return enemies.length > 0 || allies.length > 0;
+        // AI不主动用灵使技能
+        return false;
+
+      // ======================== 迪卢克-夜枭 ========================
+      case 'diluc_owl': {
+        // 手中杀>2且能攻击到敌人时才发动
+        const slashCount = me.handCards.filter(c => isSlash(c)).length;
+        if (slashCount <= 2) return false;
+        const weaponRange = getWeaponRange(me);
+        const canHit = enemies.some(e => {
+          const dist = getDistance(me, e, ctx.players);
+          return dist <= weaponRange;
+        });
+        return canHit;
+      }
+
+      // ======================== 迪卢克-晨曦酒标记 ========================
+      case 'diluc_marker_wine':
+        // 有杀在手且能攻击到敌人时才喝酒
+        const hasSlashD = me.handCards.some(c => isSlash(c));
+        return hasSlashD && enemies.length > 0;
+
+      // ======================== 凯亚-午后 ========================
+      case 'kaeya_afternoon':
+        // 有手牌时发动，SkillManager内部处理标记上限
+        return me.handCards.length > 0;
+
+      // ======================== 凯亚-午后酒标记 ========================
+      case 'kaeya_marker_wine':
+        // 有杀在手且能攻击到敌人时才喝酒
+        const hasSlashK = me.handCards.some(c => isSlash(c));
+        return hasSlashK && enemies.length > 0;
+
+      // ======================== 法尔伽-写信 ========================
+      case 'varka_write':
+        // 有手牌且有杀在手时先写信标记一个最近的敌人
+        return me.handCards.some(c => isSlash(c)) && enemies.length > 0;
+
+      // ======================== 阿贝多-炼金武器 ========================
+      case 'albedo_alchemy_weapon':
+        // 有队友没有武器时才发动，诸葛连弩优先
+        return me.handCards.filter(c => isSlash(c)).length >= 2 &&
+          allies.some(a => a.equipZone[EquipmentType.Weapon] === null);
+
+      // ======================== 阿贝多-炼金防具 ========================
+      case 'albedo_alchemy_armor':
+        // 有队友没有防具时才发动
+        return me.handCards.filter(c => c.name === '闪').length >= 2 &&
+          allies.some(a => a.equipZone[EquipmentType.Armor] === null);
+
+      // ======================== 神里绫人-家主 ========================
+      case 'ayato_head':
+        // 有手牌且有可拼点目标（敌方）时发动
+        return me.handCards.length > 0 && enemies.some(e => e.handCards.length > 0);
+
+      // ======================== 恰斯卡-调停 ========================
+      case 'chasca_mediate': {
+        // 有杀可弃置，标记敌方血量最低者
+        const hasSlashM = me.handCards.some((c: Card) => isSlash(c));
+        return hasSlashM && enemies.length > 0;
+      }
+
+      // ======================== 基尼奇-回火 ========================
+      case 'kinich_fireback': {
+        // 需要在装备区有装备才能发动，回合结束前使用
+        const hasEquip = Object.values(me.equipZone).some(v => v !== null);
+        return hasEquip && enemies.length > 0;
+      }
 
       default:
         return true; // 未知技能默认发动
@@ -1240,5 +1483,20 @@ export class AIDriver implements IPlayerDriver {
     });
 
     return indices.slice(0, Math.min(count, indices.length));
+  }
+
+  // ======================== 林尼-魔术 AI猜测 ========================
+
+  async promptMagicGuess(state: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
+    // AI随机猜测基本牌/非基本牌（50%概率）
+    return Math.random() > 0.5;
+  }
+
+  // ======================== 娜维娅-说服 AI模式选择 ========================
+
+  async promptNaviaPersuadeMode(state: PlayerState, ctx: GameContextSnapshot): Promise<number> {
+    const me = this.getMe(ctx);
+    // AI策略：仅对友方使用，且只进行效果2（拿走手牌）
+    return 2;
   }
 }

@@ -16,6 +16,7 @@ import { GameFlowController } from '../src/core/GameFlowController.js';
 import { SkillManager } from '../src/core/skills/SkillManager.js';
 import { DelayedAIDriver } from '../src/ai/DelayedAIDriver.js';
 import { RemotePlayerDriver } from './RemotePlayerDriver.js';
+import { VoiceManager } from '../src/audio/VoiceManager.js';
 import { CARD_DATA } from '../src/data/CardData.js';
 import { HeroData, getHeroById } from '../src/data/heroes.js';
 import type { Account } from './AccountManager.js';
@@ -163,6 +164,8 @@ export class GameHost {
 
     // ==================== 创建核心组件 ====================
     this.eventBus = new EventBus();
+    // 注入 EventBus 到 VoiceManager，使服务端 voice hook 通过 GameEvent.SkillVoicePlay 广播
+    VoiceManager.setEventBus(this.eventBus);
     this.deck = new DeckManager(this.eventBus);
     this.deck.init(CARD_DATA);
 
@@ -274,14 +277,27 @@ export class GameHost {
       return value;
     }));
 
+    // 注入技能标记数据到玩家对象（玉璋/无想/空月/降魔封印等）
+    const injectSkillMarks = (p: any) => {
+      const data = (this.skillManager as any).getData?.(p.id);
+      if (data) {
+        if (data.jadeCount > 0) p._jadeCount = data.jadeCount;
+        if (data.musouCount > 0) p._musouCount = data.musouCount;
+        if (data.emptyMoonCount > 0) p._emptyMoonCount = data.emptyMoonCount;
+        if (data.sealedSuits && data.sealedSuits.length > 0) p._sealedSuits = [...data.sealedSuits];
+        if (data.contractPartnerId !== undefined) p._contractPartnerId = data.contractPartnerId;
+      }
+      return p;
+    };
+
     if (cloned.data?.players) {
       cloned.data.players = cloned.data.players.map((p: any) =>
-        this.sanitizePlayerForViewer(p, viewerPlayerId)
+        injectSkillMarks(this.sanitizePlayerForViewer(p, viewerPlayerId))
       );
     }
     if (cloned.players) {
       cloned.players = cloned.players.map((p: any) =>
-        this.sanitizePlayerForViewer(p, viewerPlayerId)
+        injectSkillMarks(this.sanitizePlayerForViewer(p, viewerPlayerId))
       );
     }
     // 处理嵌套在 event data 中的 players
@@ -289,7 +305,7 @@ export class GameHost {
       for (const key of Object.keys(cloned.data)) {
         if (cloned.data[key] && typeof cloned.data[key] === 'object' && cloned.data[key].players) {
           cloned.data[key].players = cloned.data[key].players.map((p: any) =>
-            this.sanitizePlayerForViewer(p, viewerPlayerId)
+            injectSkillMarks(this.sanitizePlayerForViewer(p, viewerPlayerId))
           );
         }
       }
