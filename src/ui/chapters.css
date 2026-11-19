@@ -1,273 +1,525 @@
-/* ============================================================
-   chapters.css — 关卡选择页面样式
-   ============================================================ */
-
+/* PVE chapter browser and mission cards. */
 .chapters-page {
-  background: #0a0a1a;
-  position: relative;
-  overflow: hidden;
+  --pve-ink: #29404f;
+  --pve-muted: #526b78;
+  --pve-paper: #fdfbf5;
+  --pve-line: #cbdbe2;
+  --pve-gold: #82632d;
+  --pve-focus: #22788c;
+  --pve-gutter: clamp(14px, 3vw, 42px);
+  background: linear-gradient(155deg, #e3eff6 0%, #f5f4eb 72%);
+  color: var(--pve-ink);
+  color-scheme: light;
 }
 
-/* 章节滚动容器 */
-.chapter-scroll {
-  flex: 1;
-  display: flex;
+.chapters-page button {
+  font-family: inherit;
+  color: inherit;
+}
+
+.chapters-page button:focus-visible {
+  outline: 2px solid var(--pve-focus);
+  outline-offset: 2px;
+}
+
+.pve-header {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  position: relative;
-  overflow: hidden;
+  gap: 10px;
+  width: min(1480px, 100%);
+  min-height: 76px;
+  padding: 12px var(--pve-gutter);
+  margin-inline: auto;
 }
 
-.chapter-track {
-  display: flex;
-  gap: 0;
-  transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  height: 100%;
+.pve-header h1 {
+  font-size: clamp(18px, 2.4vw, 29px);
+  letter-spacing: .08em;
+  white-space: nowrap;
 }
 
-.chapter-card {
-  min-width: 100vw;
-  height: 100%;
+.pve-back {
+  justify-self: start;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--pve-line);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, .7);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pve-back:hover {
+  border-color: #9cb9c5;
+  background: #fffdf8;
+}
+
+.pve-player-level {
+  justify-self: end;
+  color: var(--pve-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pve-layout {
+  display: grid;
+  grid-template-columns: clamp(172px, 18vw, 236px) minmax(0, 1fr);
+  gap: clamp(16px, 2vw, 28px);
+  flex: 1;
+  min-height: 0;
+  width: min(1480px, 100%);
+  padding: 0 var(--pve-gutter) var(--pve-gutter);
+  margin-inline: auto;
+}
+
+.pve-regions {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  padding: 14px 10px 10px;
+  border: 1px solid var(--pve-line);
+  border-radius: 15px;
+  background: rgba(253, 251, 245, .88);
+}
+
+.pve-regions h2 {
+  margin: 0 8px 10px;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.pve-region-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 4px;
+  overflow: auto;
+  scrollbar-color: #a8c0c9 transparent;
+  scrollbar-width: thin;
+}
+
+.pve-region {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  position: relative;
+  gap: 10px;
+  min-height: 58px;
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
   cursor: pointer;
-  transition: all 0.3s ease;
 }
 
-.chapter-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  opacity: 0.35;
-  transition: opacity 0.5s ease;
+.pve-region:hover {
+  background: #eff5f6;
 }
 
-/* 各国背景色 */
-.chapter-mondstadt::before { background: linear-gradient(135deg, #1a5c3a, #2d8a5e, #1a5c3a); }
-.chapter-liyue::before { background: linear-gradient(135deg, #8b6914, #d4a017, #8b6914); }
-.chapter-inazuma::before { background: linear-gradient(135deg, #6a1b9a, #9c27b0, #6a1b9a); }
-.chapter-sumeru::before { background: linear-gradient(135deg, #1b5e20, #388e3c, #1b5e20); }
-.chapter-fontaine::before { background: linear-gradient(135deg, #01579b, #0288d1, #01579b); }
-.chapter-natlan::before { background: linear-gradient(135deg, #bf360c, #e64a19, #bf360c); }
-.chapter-nodkrai::before { background: linear-gradient(135deg, #4a148c, #7b1fa2, #4a148c); }
-.chapter-snezhnaya::before { background: linear-gradient(135deg, #263238, #455a64, #263238); }
-
-.chapter-card:hover::before {
-  opacity: 0.55;
+.pve-region[aria-current="true"] {
+  border-color: #a0bdc7;
+  background: #e5eff2;
+  box-shadow: inset 3px 0 #397d8c;
 }
 
-.chapter-card:hover {
-  transform: scale(1.02);
+.pve-region-image {
+  display: block;
+  width: 44px;
+  height: 42px;
+  border: 1px solid rgba(41, 64, 79, .15);
+  border-radius: 6px;
+  background: #b2c6cf var(--chapter-scene) center / cover no-repeat;
 }
 
-.chapter-content {
-  position: relative;
-  z-index: 1;
-  text-align: center;
-  animation: fadeIn 0.6s ease;
+.pve-region[data-state="unavailable"] .pve-region-image {
+  filter: saturate(.58);
 }
 
-.chapter-number {
-  font-size: 14px;
-  color: var(--gold);
-  letter-spacing: 4px;
-  margin-bottom: 8px;
-  opacity: 0.8;
+.pve-region-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
-.chapter-name {
-  font-size: 56px;
-  font-weight: 900;
-  letter-spacing: 12px;
-  color: #fff;
-  text-shadow: 0 4px 20px rgba(0,0,0,0.5);
-  margin-bottom: 12px;
+.pve-region-text strong {
+  font-size: 15px;
+  overflow-wrap: anywhere;
 }
 
-.chapter-name-en {
-  font-size: 16px;
-  color: rgba(255,255,255,0.5);
-  letter-spacing: 6px;
-  text-transform: uppercase;
+.pve-region-status {
+  color: var(--pve-muted);
+  font-size: 12px;
 }
 
-.chapter-desc {
+.pve-region[data-state="open"] .pve-region-status {
+  color: #245f55;
+}
+
+.pve-detail {
+  min-width: 0;
+  min-height: 0;
+  padding: 3px;
+  overflow-y: auto;
+  scrollbar-color: #a8c0c9 transparent;
+  scrollbar-width: thin;
+  overscroll-behavior-y: contain;
+}
+
+.pve-banner {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: clamp(192px, 26vh, 290px);
+  padding: clamp(20px, 3vw, 42px);
+  border: 1px solid #88a5b0;
+  border-radius: 17px;
+  color: #fdfbf3;
+  background:
+    linear-gradient(90deg, rgba(14, 39, 53, .88), rgba(15, 43, 57, .24) 72%),
+    linear-gradient(0deg, rgba(11, 34, 47, .57), transparent 58%),
+    var(--chapter-scene) center 46% / cover no-repeat,
+    #476e80;
+  box-shadow: 0 8px 22px rgba(37, 73, 86, .14);
+}
+
+.pve-banner-copy {
+  min-width: 0;
+  text-shadow: 0 2px 8px rgba(0, 17, 26, .4);
+}
+
+.pve-chapter-index {
+  margin-bottom: 6px;
+  color: #f1ddb0;
   font-size: 13px;
-  color: rgba(255,255,255,0.45);
-  margin-top: 16px;
-  max-width: 400px;
+  letter-spacing: .2em;
+}
+
+.pve-banner-copy h2 {
+  margin-bottom: 7px;
+  font-family: 'Noto Serif SC', 'Songti SC', SimSun, serif;
+  font-size: clamp(35px, 5.2vw, 70px);
+  line-height: 1.08;
+  letter-spacing: .06em;
+  overflow-wrap: anywhere;
+}
+
+.pve-chapter-desc {
+  color: #f5f1e2;
+  font-size: clamp(13px, 1.5vw, 16px);
   line-height: 1.6;
 }
 
-.chapter-hint {
+.pve-progress {
+  flex: 0 0 clamp(158px, 24%, 232px);
+  padding: 14px;
+  border: 1px solid rgba(229, 220, 181, .58);
+  border-radius: 10px;
+  background: rgba(20, 48, 62, .9);
   font-size: 12px;
-  color: rgba(255,255,255,0.3);
-  margin-top: 24px;
-  animation: float 2s ease-in-out infinite;
 }
 
-/* 左右箭头 */
-.scroll-arrow {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 10;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #fff;
+.pve-progress-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.pve-progress-title strong {
+  color: #ffebbf;
   font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pve-progress-title small {
+  color: #e7e8df;
+  font-size: 12px;
+}
+
+.pve-progress progress {
+  display: block;
+  appearance: none;
+  width: 100%;
+  height: 5px;
+  margin: 9px 0;
+  border: 0;
+  border-radius: 8px;
+  background: #637780;
+  overflow: hidden;
+}
+
+.pve-progress progress::-webkit-progress-bar {
+  background: #637780;
+}
+
+.pve-progress progress::-webkit-progress-value {
+  border-radius: 8px;
+  background: #ebcd82;
+}
+
+.pve-progress progress::-moz-progress-bar {
+  border-radius: 8px;
+  background: #ebcd82;
+}
+
+.pve-progress p {
+  color: #e8f0ed;
+}
+
+.pve-missions,
+.pve-availability {
+  margin-top: 22px;
+}
+
+.pve-missions h3,
+.pve-availability h3 {
+  margin-bottom: 12px;
+  font-size: 19px;
+  line-height: 1.35;
+}
+
+.pve-level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 255px), 1fr));
+  gap: 12px;
+}
+
+.pve-level-card {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  gap: 8px 12px;
+  min-width: 0;
+  min-height: 124px;
+  padding: 12px;
+  border: 1px solid var(--pve-line);
+  border-radius: 12px;
+  background: var(--pve-paper);
+  text-align: left;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 6px rgba(42, 68, 77, .05);
 }
 
-.scroll-arrow:hover {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: var(--gold);
-  box-shadow: 0 0 16px rgba(255, 215, 0, 0.2);
+.pve-level-card:hover {
+  border-color: #ae955e;
+  background: #fffdf6;
+  box-shadow: 0 5px 14px rgba(42, 68, 77, .11);
 }
 
-.scroll-arrow.left { left: 20px; }
-.scroll-arrow.right { right: 20px; }
+.pve-level-art {
+  position: relative;
+  display: grid;
+  grid-row: 1 / 3;
+  place-items: center;
+  overflow: hidden;
+  min-height: 88px;
+  border: 1px solid #c6d4d9;
+  border-radius: 6px;
+  background: #e1ecee;
+  color: var(--pve-muted);
+  font-size: 23px;
+}
 
-/* 章节指示器 */
-.chapter-dots {
+.pve-level-art img {
   position: absolute;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 10px;
-  z-index: 10;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 34%;
 }
 
-.chapter-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  cursor: pointer;
-  transition: all 0.3s ease;
+.pve-level-art img[hidden] {
+  display: none;
 }
 
-.chapter-dot.active {
-  background: var(--gold);
-  border-color: var(--gold);
-  box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
-  transform: scale(1.3);
-}
-
-/* 返回按钮 */
-.back-btn {
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  z-index: 20;
-  padding: 8px 20px;
-  font-size: 14px;
-}
-
-/* 章节进度 */
-.chapter-progress {
-  font-size: 13px;
-  color: rgba(255, 215, 0, 0.6);
-  margin-top: 12px;
-  letter-spacing: 1px;
-}
-
-/* 关卡弹窗 */
-.level-modal .modal-box {
-  min-width: 520px;
-}
-
-.level-modal-box {
-  min-width: 520px;
-}
-
-.level-list {
+.pve-level-copy {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  max-height: 50vh;
-  overflow-y: auto;
+  align-self: start;
+  gap: 3px;
+  min-width: 0;
 }
 
-.level-item {
-  padding: 14px 18px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  cursor: pointer;
-  transition: all 0.2s ease;
+.pve-level-number {
+  color: var(--pve-gold);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pve-level-name {
+  font-size: 15px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.pve-level-teams {
+  color: var(--pve-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.pve-level-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  min-width: 0;
+  padding-top: 7px;
+  border-top: 1px solid #e4e5da;
 }
 
-.level-item:hover {
-  background: rgba(255, 215, 0, 0.1);
-  border-color: var(--gold);
-  transform: translateX(4px);
+.pve-level-stars {
+  color: var(--pve-gold);
+  font-size: 15px;
+  letter-spacing: 1px;
+  white-space: nowrap;
 }
 
-.level-item.locked {
-  opacity: 0.4;
-  cursor: not-allowed;
+.pve-unearned {
+  color: #677f8a;
 }
 
-.level-item.locked:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.08);
-  transform: none;
+.pve-level-action {
+  color: #2b6475;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-.level-left {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.pve-availability {
+  max-width: 660px;
+  padding: 18px 22px;
+  border: 1px solid var(--pve-line);
+  border-radius: 13px;
+  background: var(--pve-paper);
 }
 
-.level-right {
+.pve-availability h3:only-child {
+  margin-bottom: 0;
+}
+
+.pve-availability ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+}
+
+.pve-availability li {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.level-num {
-  font-size: 18px;
-  font-weight: bold;
-  color: var(--gold);
-}
-
-.level-name {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: #edf3f4;
   font-size: 13px;
-  color: var(--text-secondary);
 }
 
-.level-difficulty {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  border: 1px solid;
-  font-weight: bold;
-}
-
-.level-go {
+.pve-condition {
+  color: #875025;
   font-size: 12px;
-  color: var(--accent-green);
-  font-weight: bold;
+  font-weight: 700;
 }
 
-.level-lock {
-  font-size: 16px;
+.pve-condition[data-met="true"] {
+  color: #286457;
+}
+
+@media (max-width: 720px) {
+  .pve-header {
+    min-height: 60px;
+  }
+
+  .pve-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
+    padding-bottom: 12px;
+  }
+
+  .pve-regions {
+    padding: 3px;
+  }
+
+  .pve-regions h2 {
+    display: none;
+  }
+
+  .pve-region-list {
+    flex-direction: row;
+    overflow: auto hidden;
+  }
+
+  .pve-region {
+    grid-template-columns: 34px auto;
+    gap: 6px;
+    min-height: 50px;
+    padding-inline: 6px 9px;
+  }
+
+  .pve-region-image {
+    width: 34px;
+    height: 34px;
+  }
+
+  .pve-region-text strong {
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .pve-region-status {
+    font-size: 11px;
+  }
+
+  .pve-banner {
+    min-height: 175px;
+    padding: 16px;
+  }
+
+  .pve-missions,
+  .pve-availability {
+    margin-top: 16px;
+  }
+}
+
+@media (max-width: 460px) {
+  .pve-header {
+    gap: 6px;
+  }
+
+  .pve-back {
+    padding-inline: 9px;
+    font-size: 11px;
+  }
+
+  .pve-player-level {
+    font-size: 11px;
+  }
+
+  .pve-banner {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .pve-progress {
+    flex-basis: auto;
+    padding: 9px 11px;
+  }
+
+  .pve-progress progress {
+    margin-block: 5px;
+  }
 }

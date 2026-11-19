@@ -4,6 +4,8 @@
 
 import { router } from './router';
 import { socketManager } from '../network/SocketManager';
+import type { PublicRoom } from '../network/RoomProtocol';
+import { getRandomPVPBackground, toCssImage } from './BackgroundAssets';
 
 interface RoomListItem {
   id: string;
@@ -21,86 +23,90 @@ export class MatchPage {
 
   render(): HTMLElement {
     const container = document.createElement('div');
-    container.className = 'page match-page';
+    container.className = 'page match-page pvp-lobby';
     container.innerHTML = `
-      <div style="display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <header class="pvp-lobby-nav">
         <button class="btn btn-ghost btn-sm" id="match-back">← 返回主页</button>
-        <div style="flex:1;text-align:center;font-size:20px;font-weight:bold;color:var(--gold);letter-spacing:4px;">PVP 联机对战</div>
-        <div style="width:80px;text-align:right;color:rgba(255,255,255,0.5);font-size:12px;" id="match-account"></div>
-      </div>
-      <div class="match-container">
-        <div class="room-list-panel">
-          <div class="room-list-header">
-            <h2>房间列表</h2>
-            <button class="btn btn-ghost btn-sm" id="refresh-rooms">刷新</button>
-          </div>
-          <div class="room-list" id="room-list">
-            <div style="text-align:center;color:var(--text-dim);padding:40px;">加载中...</div>
-          </div>
+        <div class="pvp-lobby-account">
+          <span id="match-account"></span>
+          <span class="pvp-lobby-connection" id="match-connection" role="status"></span>
         </div>
-        <div class="create-panel">
-          <div class="create-card">
-            <h3>创建房间</h3>
-            <div class="form-group">
-              <label>房间名称</label>
-              <input class="form-input" id="room-name" placeholder="输入房间名称..." value="原神杀房间" />
-            </div>
-            <div class="toggle-row">
-              <div class="toggle-switch" id="private-toggle"></div>
-              <span class="toggle-label">私密模式</span>
-            </div>
-            <div class="form-group" id="password-group" style="display:none;">
-              <label>房间密码</label>
-              <input class="form-input" id="room-password" type="password" placeholder="输入密码..." />
-            </div>
-            <button class="btn btn-gold create-btn" id="create-room">创建房间</button>
-          </div>
-          <button class="btn quick-match-btn" id="quick-match">⚡ 加入房间（输入房号）</button>
+      </header>
+      <main class="pvp-lobby-content">
+        <section class="pvp-lobby-banner" aria-labelledby="pvp-lobby-title">
+          <h1 id="pvp-lobby-title">PVP 联机对战</h1>
+          <p>八人身份局 · 可用 AI 填补空位</p>
+        </section>
+        <div class="pvp-lobby-layout">
+          <section class="pvp-lobby-panel pvp-room-directory" aria-labelledby="pvp-room-title">
+            <header class="pvp-room-directory-header">
+              <div>
+                <h2 id="pvp-room-title">房间列表</h2>
+                <p id="room-list-summary" role="status">正在载入房间</p>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="refresh-rooms" type="button">刷新</button>
+            </header>
+            <ul class="pvp-room-list" id="room-list"></ul>
+            <p class="pvp-room-placeholder" id="room-list-placeholder">正在载入房间…</p>
+          </section>
+          <aside class="pvp-lobby-tools">
+            <form class="pvp-lobby-panel pvp-lobby-form" id="join-room-form">
+              <h2>按房号加入</h2>
+              <label for="join-room-code">房间号</label>
+              <input id="join-room-code" placeholder="输入房间号" autocomplete="off" spellcheck="false" required>
+              <details id="join-password-details">
+                <summary>输入房间密码</summary>
+                <input id="join-room-password" type="password" aria-label="加入房间的密码" autocomplete="off" placeholder="房间密码">
+              </details>
+              <button class="btn btn-gold" id="quick-match" type="submit">加入房间</button>
+            </form>
+            <form class="pvp-lobby-panel pvp-lobby-form" id="create-room-form">
+              <h2>创建房间</h2>
+              <label for="room-name">房间名称</label>
+              <input id="room-name" value="原神杀房间">
+              <label class="pvp-lobby-checkbox">
+                <input type="checkbox" id="private-toggle" aria-controls="password-group">
+                设置加入密码
+              </label>
+              <div id="password-group" hidden>
+                <label for="room-password">房间密码</label>
+                <input id="room-password" type="password" autocomplete="off">
+              </div>
+              <button class="btn btn-ghost" id="create-room" type="submit">创建房间</button>
+            </form>
+            <p class="pvp-lobby-error" id="match-error" role="alert" hidden></p>
+          </aside>
         </div>
-      </div>
+      </main>
     `;
 
-    // 返回
     container.querySelector('#match-back')!.addEventListener('click', () => router.navigate('home'));
-
-    // 刷新
-    container.querySelector('#refresh-rooms')!.addEventListener('click', () => {
-      socketManager.emit('get_room_list');
+    container.querySelector('#refresh-rooms')!.addEventListener('click', () => this.requestRooms());
+    const toggle = container.querySelector<HTMLInputElement>('#private-toggle')!;
+    const passwordGroup = container.querySelector<HTMLElement>('#password-group')!;
+    const createPassword = container.querySelector<HTMLInputElement>('#room-password')!;
+    toggle.addEventListener('change', () => {
+      passwordGroup.hidden = !toggle.checked;
+      createPassword.required = toggle.checked;
+      if (toggle.checked) createPassword.focus();
+      else createPassword.value = '';
     });
-
-    // 私密切换
-    const toggle = container.querySelector('#private-toggle')!;
-    const passwordGroup = container.querySelector('#password-group')! as HTMLElement;
-    let isPrivate = false;
-    toggle.addEventListener('click', () => {
-      isPrivate = !isPrivate;
-      toggle.classList.toggle('on', isPrivate);
-      passwordGroup.style.display = isPrivate ? 'block' : 'none';
-    });
-
-    // 创建房间
-    container.querySelector('#create-room')!.addEventListener('click', () => {
-      if (!socketManager.isConnected) {
-        alert('未连接到服务器，请刷新页面');
-        return;
-      }
-
-      const nameInput = container.querySelector('#room-name') as HTMLInputElement;
-      const pwInput = container.querySelector('#room-password') as HTMLInputElement;
-      const aiSelect = container.querySelector('#ai-fill') as HTMLSelectElement;
-
+    container.querySelector('#create-room-form')!.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!this.canSend()) return;
+      const nameInput = container.querySelector<HTMLInputElement>('#room-name')!;
       socketManager.emit('create_room', {
-        roomName: nameInput.value || '原神杀房间',
-        password: isPrivate ? (pwInput.value || null) : null,
+        roomName: nameInput.value.trim() || '原神杀房间',
+        password: toggle.checked ? createPassword.value : null,
       });
     });
-
-    // 加入房间（输入房号）
-    container.querySelector('#quick-match')!.addEventListener('click', () => {
-      const code = prompt('请输入房间号:');
-      if (code && code.trim()) {
-        this.tryJoinRoom(code.trim().toUpperCase());
-      }
+    container.querySelector('#join-room-form')!.addEventListener('submit', event => {
+      event.preventDefault();
+      const code = container.querySelector<HTMLInputElement>('#join-room-code')!.value.trim().toUpperCase();
+      const details = container.querySelector<HTMLDetailsElement>('#join-password-details')!;
+      const password = container.querySelector<HTMLInputElement>('#join-room-password')!.value;
+      if (!code) { this.showError('请输入房间号'); return; }
+      this.tryJoinRoom(code, details.open ? password : '');
     });
 
     this.el = container;
@@ -108,32 +114,46 @@ export class MatchPage {
   }
 
   show(): void {
+    this.el.style.setProperty('--pvp-background-image', toCssImage(getRandomPVPBackground()));
     this.el.classList.add('active');
 
-    // 显示账号名
     const accountEl = this.el.querySelector('#match-account')!;
-    accountEl.textContent = socketManager.account?.name || '';
+    accountEl.textContent = socketManager.account?.nickname || socketManager.account?.name || '';
+    this.showError('');
+    this.updateConnection(socketManager.isConnected);
 
     // 监听房间列表
     this.unsubs.push(socketManager.on('room_list', (data: { rooms: RoomListItem[] }) => {
-      this.rooms = data.rooms;
+      this.rooms = data.rooms || [];
       this.renderRoomList();
     }));
 
-    this.unsubs.push(socketManager.on('room_created', (data: any) => {
-      router.navigate('waiting', { roomId: data.roomId, isHost: true, mySlotIndex: data.mySlotIndex });
+    this.unsubs.push(socketManager.on('room_created', (data: { roomId: string; room: PublicRoom; mySlotIndex: number }) => {
+      router.navigate('waiting', { roomId: data.roomId, room: data.room, isHost: true, mySlotIndex: data.mySlotIndex });
     }));
 
-    this.unsubs.push(socketManager.on('room_joined', (data: any) => {
-      router.navigate('waiting', { roomId: data.roomId, isHost: false, mySlotIndex: data.mySlotIndex });
+    this.unsubs.push(socketManager.on('room_joined', (data: { roomId: string; room: PublicRoom; mySlotIndex: number }) => {
+      router.navigate('waiting', { roomId: data.roomId, room: data.room, isHost: false, mySlotIndex: data.mySlotIndex });
     }));
 
-    this.unsubs.push(socketManager.on('error_msg', (data: any) => {
-      alert(data.reason || '操作失败');
+    this.unsubs.push(socketManager.on('error_msg', (data: { reason?: string }) => {
+      this.showError(data.reason || '操作失败');
+      if (data.reason?.includes('密码')) {
+        const details = this.el.querySelector<HTMLDetailsElement>('#join-password-details')!;
+        if (this.el.querySelector<HTMLButtonElement>('#quick-match') === document.activeElement ||
+            this.el.querySelector('#join-room-form')?.contains(document.activeElement)) {
+          details.open = true;
+          details.querySelector('input')?.focus();
+        }
+      }
     }));
-
-    // 请求房间列表
-    socketManager.emit('get_room_list');
+    this.unsubs.push(socketManager.on('__connected', () => {
+      this.updateConnection(true);
+      this.requestRooms();
+    }));
+    this.unsubs.push(socketManager.on('__disconnected', () => this.updateConnection(false)));
+    this.unsubs.push(socketManager.on('__connection_error', () => this.updateConnection(false)));
+    if (socketManager.isConnected) this.requestRooms();
   }
 
   hide(): void {
@@ -144,40 +164,64 @@ export class MatchPage {
 
   private renderRoomList(): void {
     const listEl = this.el.querySelector('#room-list')!;
-    if (this.rooms.length === 0) {
-      listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px;">暂无房间</div>';
-      return;
-    }
-    listEl.innerHTML = this.rooms.map(r => {
-      const aiText = (r.aiFill && r.aiFill > 0) ? ` +${r.aiFill}AI` : '';
-      return `
-      <div class="room-item" data-room="${r.id}" data-password="${r.hasPassword}">
-        <div class="room-id">${r.name} <span style="font-size:11px;color:rgba(255,255,255,0.3);">#${r.id}</span></div>
-        <div class="room-info">
-          <span class="room-players">${r.playerCount}人${aiText}/${r.maxSlots}</span>
-          <span class="room-lock-icon">${r.hasPassword ? '🔒' : '🔓'}</span>
-        </div>
-      </div>
-    `;}).join('');
-
-    listEl.querySelectorAll('.room-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const el = item as HTMLElement;
-        const roomId = el.dataset.room!;
-        const hasPassword = el.dataset.password === 'true';
-
-        if (hasPassword) {
-          const pw = prompt('请输入房间密码:');
-          if (pw === null) return;
-          socketManager.emit('join_room', { roomId, password: pw });
-        } else {
-          socketManager.emit('join_room', { roomId });
-        }
+    const placeholder = this.el.querySelector<HTMLElement>('#room-list-placeholder')!;
+    placeholder.hidden = this.rooms.length > 0;
+    placeholder.textContent = '暂无房间，可以创建一间或输入房间号加入。';
+    this.el.querySelector('#room-list-summary')!.textContent = `${this.rooms.length} 间房间`;
+    listEl.replaceChildren(...this.rooms.map(room => {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      const full = room.playerCount >= room.maxSlots;
+      button.type = 'button';
+      button.className = 'pvp-room-row';
+      button.disabled = full;
+      button.innerHTML = '<span class="pvp-room-identity"><strong></strong><small></small></span><span class="pvp-room-meta"></span><span class="pvp-room-access"></span><span class="pvp-room-join"></span>';
+      button.querySelector('strong')!.textContent = room.name;
+      button.querySelector('small')!.textContent = `#${room.id}`;
+      button.querySelector('.pvp-room-meta')!.textContent = `真人 ${room.playerCount}/${room.maxSlots}${room.aiFill ? ` · AI ${room.aiFill}` : ''}`;
+      button.querySelector('.pvp-room-access')!.textContent = room.hasPassword ? '需密码' : '公开';
+      button.querySelector('.pvp-room-join')!.textContent = full ? '已满' : '加入 →';
+      button.addEventListener('click', () => {
+        if (!room.hasPassword) { this.tryJoinRoom(room.id); return; }
+        if (!this.canSend()) return;
+        this.el.querySelector<HTMLInputElement>('#join-room-code')!.value = room.id;
+        const details = this.el.querySelector<HTMLDetailsElement>('#join-password-details')!;
+        details.open = true;
+        const input = details.querySelector('input')!;
+        input.value = '';
+        input.focus();
       });
-    });
+      item.append(button);
+      return item;
+    }));
   }
 
-  private tryJoinRoom(roomId: string): void {
-    socketManager.emit('join_room', { roomId });
+  private showError(message: string): void {
+    const error = this.el.querySelector<HTMLElement>('#match-error')!;
+    error.hidden = !message;
+    error.textContent = message;
+  }
+
+  private updateConnection(online: boolean): void {
+    const indicator = this.el.querySelector<HTMLElement>('#match-connection')!;
+    indicator.dataset.online = String(online);
+    indicator.textContent = online ? '已连接' : '连接中断';
+    if (!online && this.rooms.length === 0) {
+      this.el.querySelector('#room-list-summary')!.textContent = '等待服务器连接';
+      this.el.querySelector('#room-list-placeholder')!.textContent = '连上服务器后将显示房间。';
+    }
+  }
+
+  private canSend(): boolean {
+    this.showError(socketManager.isConnected ? '' : '连接中断，请稍后重试。');
+    return socketManager.isConnected;
+  }
+
+  private requestRooms(): void {
+    if (this.canSend()) socketManager.emit('get_room_list');
+  }
+
+  private tryJoinRoom(roomId: string, password = ''): void {
+    if (this.canSend()) socketManager.emit('join_room', password ? { roomId, password } : { roomId });
   }
 }

@@ -6,9 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck": "tsc --noEmit && tsc -p server/tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/GameSession.test.ts tests/BackgroundAssets.test.ts tests/ChatService.test.ts tests/AccountApiClient.test.ts tests/PvpSettlementQueue.test.ts tests/BattleInteractions.test.ts tests/EquipEffectManager.test.ts",
+    "test:backend:smoke": "node scripts/smoke-backend.mjs",
+    "test:game:stress": "node --import tsx scripts/stress-games.ts",
     "preview": "vite preview",
-    "server": "npx tsx server/index.ts",
-    "start": "concurrently \"npm run server\" \"npm run dev\""
+    "server": "node scripts/game-server.mjs",
+    "backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/java-backend.ps1 -Task run",
+    "backend:test": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/java-backend.ps1 -Task test",
+    "backend:package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/java-backend.ps1 -Task package",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1"
   },
   "dependencies": {
     "express": "^4.21.0",

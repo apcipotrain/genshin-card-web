@@ -17,7 +17,7 @@ export class DamageSystem {
   private eventBus: EventBus;
   private drivers: Map<number, IPlayerDriver>;
   private allPlayers: PlayerState[];
-  private gameOverCallback: ((winner: string | null) => void) | null = null;
+  private gameOverCallback: ((winner: string) => void) | null = null;
 
   // 外部依赖注入
   public equipBeforeDamageHandler: ((target: PlayerState, damage: { value: number }, sourceCard: Card | null) => void) | null = null;
@@ -42,7 +42,7 @@ export class DamageSystem {
     onKinichAjaw: (source: PlayerState, target: PlayerState) => void;
     getFireDamageBonus: (source: PlayerState) => number;
     onJadeProtect: (player: PlayerState, damage: number) => number;
-    onDehyaMercenaryProtect: (target: PlayerState, damage: number) => { protect: boolean; damage: number };
+    onDehyaMercenaryProtect: (target: PlayerState, damage: number) => Promise<{ protect: boolean; damage: number }>;
     onDealingDamage: (source: PlayerState, target: PlayerState, damage: number, sourceCard: Card | null) => Promise<{ intercepted: boolean; data?: any }>;
     tryUseMarkerAsWine: (playerId: number) => boolean;
     onHealthLoss: (player: PlayerState, amount: number, sourceName: string) => void;
@@ -52,6 +52,7 @@ export class DamageSystem {
     onAfterCardPlay: (player: PlayerState, card?: Card) => Promise<void>;
     checkFrostMark: (target: PlayerState, sourceCard: Card | null) => number;
     isImmuneToFire: (player: PlayerState) => boolean;
+    getData: (playerId: number) => any;
   } | null = null;
 
   constructor(
@@ -66,7 +67,7 @@ export class DamageSystem {
     this.allPlayers = allPlayers;
   }
 
-  setGameOverCallback(cb: (winner: string | null) => void): void {
+  setGameOverCallback(cb: (winner: string) => void): void {
     this.gameOverCallback = cb;
   }
 
@@ -140,7 +141,7 @@ export class DamageSystem {
 
       // 佣兵承伤（迪希雅-佣兵）
       if (this.skillManager) {
-        const mercResult = this.skillManager.onDehyaMercenaryProtect(target, positiveDamage);
+        const mercResult = await this.skillManager.onDehyaMercenaryProtect(target, positiveDamage);
         if (mercResult.protect) {
           // 伤害已被转移，不再对原目标造成伤害
           return;
@@ -563,6 +564,8 @@ export class DamageSystem {
       this.eventBus.emit(GameEvent.Log, {
         message: `${target.name} 打出了【${response.name}】${suitSym}${numText}`
       });
+      // 响应牌不经过 CardEffectManager.handleActivePlay，需要在这里补播普通牌语音。
+      VoiceManager.getInstance().playCardVoice(target.gender, cardName);
 
       // 妮露-水环：黑色牌当闪使用时触发语音
       if (target.heroId === 'nilou' && cardName === '闪' &&
@@ -587,6 +590,7 @@ export class DamageSystem {
       const virtualSlash = this.zhanBaHandler(target, false);
       if (virtualSlash) {
         virtualSlash.cardSource = target;
+        VoiceManager.getInstance().playCardVoice(target.gender, cardName);
         this.eventBus.emit(GameEvent.Log, {
           message: `${target.name} 用【丈八蛇矛】将两张手牌合成为【杀】！`
         });

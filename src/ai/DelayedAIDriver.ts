@@ -4,6 +4,7 @@
 
 import type { PlayerState, Card, GameContextSnapshot, ZoneSelection } from '../core/types.js';
 import { AIDriver } from './AIDriver.js';
+import { GameSession } from '../core/GameSession.js';
 
 /**
  * 为 AI Driver 的每个决策方法添加固定延迟。
@@ -12,6 +13,7 @@ import { AIDriver } from './AIDriver.js';
  */
 export class DelayedAIDriver {
   readonly playerId: number;
+  readonly isAutomated = true;
   private ai: AIDriver;
   /** getter 函数：每次调用 delay() 时动态读取当前延迟值，PVE 模式下跟随 globalAiDelayMs 变化 */
   private getDelayMs: () => number;
@@ -22,13 +24,14 @@ export class DelayedAIDriver {
    *   - PVE: () => globalAiDelayMs（跟随UI设置动态变化）
    *   - PVP: () => 1200（固定值）
    */
-  constructor(playerId: number, getDelayMs: () => number) {
+  constructor(playerId: number, getDelayMs: () => number, private session?: GameSession) {
     this.playerId = playerId;
     this.getDelayMs = getDelayMs;
     this.ai = new AIDriver(playerId);
   }
 
   private delay(): Promise<void> {
+    if (this.session) return this.session.delay(this.getDelayMs());
     return new Promise(resolve => setTimeout(resolve, this.getDelayMs()));
   }
 

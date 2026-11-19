@@ -7,62 +7,72 @@ import { socketManager } from '../network/SocketManager';
 import { ALL_HEROES, HeroData, getHeroById } from '../data/heroes';
 import { VoiceManager } from '../audio/VoiceManager';
 import { cacheGet, cacheSave, syncAllSettings } from '../data/SettingsCache';
-import { syncPVEStarsFromServer } from '../data/PVELevels';
+import { syncPVEStarsFromServer, getPVEStarRecords } from '../data/PVELevels';
+import { uiIcon } from './icons';
+import { getPVEBackground, getRandomPVPBackground, toCssImage } from './BackgroundAssets';
 
 export class HomePage {
   private el!: HTMLElement;
   private avatarPreview: string = '';
   private currentPanel: 'account' | 'achievement' | 'compendium' | 'settings' | null = null;
   private overlay: HTMLElement | null = null;
+  private disposeExperienceHelp: (() => void) | null = null;
 
   render(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'page home-page';
     container.innerHTML = `
       <!-- ========== 左侧竖排导航 ========== -->
-      <div class="home-sidebar">
-        <div class="sidebar-item" data-panel="account">
-          <span class="sidebar-icon">👤</span>
-          <span class="sidebar-label">账号管理</span>
-        </div>
-        <div class="sidebar-item" data-panel="achievement">
-          <span class="sidebar-icon">🏅</span>
+      <nav class="home-sidebar" aria-label="旅行菜单">
+        <div class="sidebar-brand" aria-hidden="true">${uiIcon('compass')}</div>
+        <button type="button" class="sidebar-item" data-panel="account">
+          <span class="sidebar-icon">${uiIcon('user')}</span>
+          <span class="sidebar-label">旅行档案</span>
+        </button>
+        <button type="button" class="sidebar-item" data-panel="achievement">
+          <span class="sidebar-icon">${uiIcon('medal')}</span>
           <span class="sidebar-label">成就系统</span>
-        </div>
-        <div class="sidebar-item" data-panel="compendium">
-          <span class="sidebar-icon">📖</span>
-          <span class="sidebar-label">图 鉴</span>
-        </div>
-        <div class="sidebar-item" data-panel="settings">
-          <span class="sidebar-icon">⚙️</span>
-          <span class="sidebar-label">设 置</span>
-        </div>
+        </button>
+        <button type="button" class="sidebar-item" data-panel="compendium">
+          <span class="sidebar-icon">${uiIcon('book')}</span>
+          <span class="sidebar-label">角色图鉴</span>
+        </button>
+        <button type="button" class="sidebar-item" data-panel="settings">
+          <span class="sidebar-icon">${uiIcon('settings')}</span>
+          <span class="sidebar-label">旅途设置</span>
+        </button>
         <div class="sidebar-divider"></div>
-        <div class="sidebar-item sidebar-logout" id="btn-logout">
-          <span class="sidebar-icon">🚪</span>
+        <button type="button" class="sidebar-item sidebar-logout" id="btn-logout">
+          <span class="sidebar-icon">${uiIcon('logout')}</span>
           <span class="sidebar-label">退出账号</span>
-        </div>
-      </div>
+        </button>
+      </nav>
 
       <!-- ========== 中间主区域 ========== -->
       <div class="home-main">
         <div class="home-header">
-          <div class="home-title">原 神 杀</div>
-          <div class="home-subtitle">GENSHIN CARD · 八人军争</div>
+          <div class="travel-eyebrow">GENSHIN CARD · 提瓦特旅记</div>
+          <h1 class="home-title">原神杀</h1>
+          <div class="home-subtitle">循风而行，赴一场新的对局。</div>
           <div class="home-status" id="home-status"></div>
         </div>
         <div class="home-modes">
-          <div class="mode-card pve" id="btn-pve">
-            <div class="mode-icon">⚔️</div>
-            <div class="mode-name">P V E</div>
-            <div class="mode-desc">闯关模式<br/>选择章节，与人机对战<br/>逐步解锁更多关卡</div>
-          </div>
-          <div class="mode-card pvp" id="btn-pvp">
-            <div class="mode-icon">🏆</div>
-            <div class="mode-name">P V P</div>
-            <div class="mode-desc">联机模式<br/>创建或加入房间<br/>与真实玩家对战</div>
-          </div>
+          <button type="button" class="mode-card pve" id="btn-pve">
+            <span class="mode-kicker">01 / PVE</span>
+            <span class="mode-icon">${uiIcon('compass')}</span>
+            <span class="mode-name">踏上旅途</span>
+            <span class="mode-desc">选择章节，与伙伴一起闯关。</span>
+            <span class="mode-link">探索章节 ${uiIcon('arrow')}</span>
+          </button>
+          <button type="button" class="mode-card pvp" id="btn-pvp">
+            <span class="mode-kicker">02 / PVP</span>
+            <span class="mode-icon">${uiIcon('swords')}</span>
+            <span class="mode-name">以牌会友</span>
+            <span class="mode-desc">相聚牌桌，开启八人身份对局。</span>
+            <span class="mode-link">前往联机 ${uiIcon('arrow')}</span>
+          </button>
         </div>
+        <div class="home-location">${uiIcon('compass')} 云端大厅 · 旅途起点</div>
         <div class="home-footer" id="home-footer">v2.0 · 原神杀 · 八人军争</div>
       </div>
 
@@ -95,6 +105,20 @@ export class HomePage {
     this.overlay!.addEventListener('click', () => {
       this.closePanel();
     });
+    this.overlay!.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') this.closePanel();
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(this.overlay!.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not([type="file"]), select, [tabindex="0"]'
+      )).filter(el => el.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first?.focus();
+      }
+    });
 
     this.el = container;
     return container;
@@ -103,6 +127,7 @@ export class HomePage {
   // ==================== 弹窗系统 ====================
 
   private openPanel(panel: 'account' | 'achievement' | 'compendium' | 'settings'): void {
+    this.disposeExperienceHelp?.();
     this.currentPanel = panel;
 
     // 高亮侧边栏
@@ -117,14 +142,26 @@ export class HomePage {
 
     // 绑定内容中的事件
     this.bindPanelEvents(panel);
+    const dialog = overlay.querySelector<HTMLElement>('.panel-modal');
+    dialog?.setAttribute('role', 'dialog');
+    dialog?.setAttribute('aria-modal', 'true');
+    dialog?.setAttribute('aria-label', dialog.querySelector('h2')?.textContent || '旅行面板');
+    const close = overlay.querySelector<HTMLButtonElement>('#panel-close');
+    close?.setAttribute('aria-label', '关闭面板');
+    close?.focus();
   }
 
   private closePanel(): void {
+    this.disposeExperienceHelp?.();
+    const previousPanel = this.currentPanel;
     this.currentPanel = null;
     this.el.querySelectorAll('.sidebar-item[data-panel]').forEach(item => item.classList.remove('active'));
     const overlay = this.overlay!;
     overlay.classList.remove('active');
     overlay.innerHTML = '';
+    if (previousPanel && this.el.classList.contains('active')) {
+      this.el.querySelector<HTMLElement>(`[data-panel="${previousPanel}"]`)?.focus();
+    }
   }
 
   /** 生成各面板的 HTML */
@@ -136,24 +173,57 @@ export class HomePage {
     // 经验进度：优先 pdata.progress → acc 上的计算值 → 兜底
     const currentExp = pdata?.progress?.currentExp ?? acc?.currentLevelExp ?? 0;
     const nextExp = pdata?.progress?.nextExp ?? acc?.nextLevelExp ?? 100;
-    const expPct = nextExp > 0 ? Math.min(100, Math.round((currentExp / nextExp) * 100)) : 100;
+    const expPct = nextExp > 0 ? Math.max(0, Math.min(100, Math.round((currentExp / nextExp) * 100))) : 100;
 
     if (panel === 'account') {
+      const stats = (acc as any)?.stats || { totalGames: 0, totalWins: 0, monarch: { games: 0, wins: 0 }, minister: { games: 0, wins: 0 }, rebel: { games: 0, wins: 0 }, traitor: { games: 0, wins: 0 } };
+      const winRate = stats.totalGames > 0 ? Math.round((stats.totalWins / stats.totalGames) * 100) : 0;
+      const roleRate = (r: string) => {
+        const d = stats[r];
+        if (!d || d.games === 0) return '0%';
+        return Math.round((d.wins / d.games) * 100) + '%';
+      };
+      const statsHtml = `
+        <div class="account-stats-section">
+          <div class="stats-title">🏆 PVP 战绩</div>
+          <div class="stats-summary">
+            <span>总对局：${stats.totalGames}场</span>
+            <span>总胜场：${stats.totalWins}场</span>
+            <span>胜率：<b style="color:${stats.totalGames > 0 && winRate >= 50 ? 'var(--accent-green)' : stats.totalGames > 0 ? 'var(--accent-red)' : 'var(--text-dim)'}">${winRate}%</b></span>
+          </div>
+          <div class="stats-roles">
+            <div class="stats-role"><span class="role-tag monarch">主公</span><span>${roleRate('monarch')}</span></div>
+            <div class="stats-role"><span class="role-tag minister">忠臣</span><span>${roleRate('minister')}</span></div>
+            <div class="stats-role"><span class="role-tag rebel">反贼</span><span>${roleRate('rebel')}</span></div>
+            <div class="stats-role"><span class="role-tag traitor">内奸</span><span>${roleRate('traitor')}</span></div>
+          </div>
+        </div>`;
+      // PVE 星数汇总
+      let pveStarsHtml = '';
+      try {
+        const starsRecord = getPVEStarRecords();
+        const totalStars = Object.values(starsRecord).reduce((s, v) => s + (v as number), 0);
+        if (totalStars > 0) {
+          pveStarsHtml = `<div class="account-stats-section"><div class="stats-title">⭐ PVE 闯关</div><div class="stats-summary"><span>累计星数：${totalStars} ⭐</span></div></div>`;
+        }
+      } catch {}
       return `
-        <div class="panel-modal" onclick="event.stopPropagation()">
+        <div class="panel-modal account-modal" onclick="event.stopPropagation()">
           <div class="panel-modal-header">
-            <h2>👤 账号管理</h2>
+            <div><div class="travel-eyebrow">TRAVELER'S PROFILE</div><h2>旅行档案</h2></div>
             <button class="panel-close-btn" id="panel-close">✕</button>
           </div>
           <div class="panel-modal-body">
             <div class="account-layout">
               <div class="account-avatar-section">
-                <div class="avatar-wrapper" id="avatar-wrapper" title="点击上传头像">
+                <div class="account-emblem" aria-hidden="true">${uiIcon('compass')}</div>
+                <button type="button" class="avatar-wrapper" id="avatar-wrapper" title="点击上传头像" aria-label="上传头像">
                   <img class="avatar-img" id="avatar-img" src="${acc?.avatar || ''}" alt="头像" style="${acc?.avatar ? 'display:block' : 'display:none'}" />
-                  <div class="avatar-placeholder" id="avatar-placeholder" style="${acc?.avatar ? 'display:none' : 'display:flex'}">点击<br/>上传</div>
-                </div>
+                  <span class="avatar-placeholder" id="avatar-placeholder" style="${acc?.avatar ? 'display:none' : 'display:flex'}">${uiIcon('user')}<span>上传头像</span></span>
+                </button>
                 <input type="file" id="avatar-file-input" accept="image/*" style="display:none" />
                 <div class="account-level-badge">Lv.${lvl}</div>
+                <div class="account-traveler-label">冒险等阶</div>
               </div>
               <div class="account-info-section">
                 <div class="account-field">
@@ -161,14 +231,34 @@ export class HomePage {
                   <span class="field-value" id="acc-username">${acc?.name || '—'}</span>
                 </div>
                 <div class="account-field">
-                  <span class="field-label">游戏昵称</span>
+                  <label class="field-label" for="acc-nickname">游戏昵称</label>
                   <input class="field-input" id="acc-nickname" placeholder="输入昵称..." maxlength="12" value="${acc?.nickname || acc?.name || ''}" />
                 </div>
-                ${lvl < 60 ? `
                 <div class="account-exp-bar">
-                  <div class="exp-bar-label">经验 ${currentExp}/${nextExp}</div>
-                  <div class="exp-bar-track"><div class="exp-bar-fill" style="width:${expPct}%"></div></div>
-                </div>` : '<div class="account-exp-bar" style="color:var(--gold);">🎉 已满级 Lv.60</div>'}
+                  <div class="account-exp-heading">
+                    <span>冒险经验</span>
+                    <strong>${lvl < 60 ? `${currentExp} / ${nextExp}` : '已满级 Lv.60'}</strong>
+                    <button type="button" class="account-exp-help-button" aria-label="经验规则" aria-controls="account-exp-rules" aria-expanded="false">?</button>
+                  </div>
+                  ${lvl < 60 ? `<div class="exp-bar-track" role="progressbar" aria-label="当前等级经验" aria-valuemin="0" aria-valuenow="${Math.max(0, Math.min(currentExp, nextExp))}" aria-valuemax="${Math.max(1, nextExp)}"><div class="exp-bar-fill" style="width:${expPct}%"></div></div>` : ''}
+                  <section class="account-exp-rules" id="account-exp-rules" aria-labelledby="account-exp-rules-title" tabindex="0" popover="manual" hidden>
+                    <h3 id="account-exp-rules-title">经验规则</h3>
+                    <p>Lv.1–55 升一级需要当前等级 × 100 经验，Lv.56–59 需要当前等级 × 1,000 经验，Lv.60 封顶。</p>
+                    <p><b>PVE 闯关</b> 正常结算获得 20 经验，关卡星级单独统计。</p>
+                    <table aria-label="PVP 基础经验与击杀加减">
+                      <thead><tr><th scope="col">身份</th><th scope="col">胜利基础</th><th scope="col">击杀加减</th></tr></thead>
+                      <tbody>
+                        <tr><th scope="row">主公</th><td>75</td><td>反贼 +3、内奸 +2、忠臣 −5</td></tr>
+                        <tr><th scope="row">忠臣</th><td>50</td><td>反贼 +3、内奸 +2、主公 −5</td></tr>
+                        <tr><th scope="row">反贼</th><td>40</td><td>忠臣 +3、内奸 +3、主公 +5</td></tr>
+                        <tr><th scope="row">内奸</th><td>100</td><td>每击杀一人 +3</td></tr>
+                      </tbody>
+                    </table>
+                    <p class="account-exp-rules-note">PVP 失败基础经验为 20。主公、忠臣和反贼对同一身份的击杀加减只计一次。逃跑不获经验。</p>
+                  </section>
+                </div>
+                ${statsHtml}
+                ${pveStarsHtml}
                 <div class="account-field-hint">头像和昵称在PVP等待界面显示</div>
                 <button class="btn btn-gold btn-sm" id="btn-save-profile">保存资料</button>
                 <span class="profile-msg" id="profile-msg"></span>
@@ -273,6 +363,7 @@ export class HomePage {
 
   private bindAccountEvents(): void {
     const overlay = this.overlay!;
+    this.bindExperienceHelp();
 
     // 头像上传
     const avatarWrapper = overlay.querySelector('#avatar-wrapper')!;
@@ -341,6 +432,90 @@ export class HomePage {
       socketManager.emit('update_profile', data);
       this.showProfileMsg('保存中...', false);
     });
+  }
+
+  private bindExperienceHelp(): void {
+    const modal = this.overlay!.querySelector<HTMLElement>('.account-modal')!;
+    const body = modal.querySelector<HTMLElement>('.panel-modal-body')!;
+    const experience = modal.querySelector<HTMLElement>('.account-exp-bar')!;
+    const trigger = experience.querySelector<HTMLButtonElement>('.account-exp-help-button')!;
+    const rules = experience.querySelector<HTMLElement>('.account-exp-rules')!;
+    const usePopover = typeof rules.showPopover === 'function';
+    if (!usePopover) rules.removeAttribute('popover');
+
+    let pinned = false;
+    const events = new AbortController();
+    const positionRules = () => {
+      if (rules.hidden || !usePopover) return;
+      const anchor = trigger.getBoundingClientRect();
+      const viewportWidth = document.documentElement.clientWidth;
+      const viewportHeight = window.innerHeight;
+      const inset = 12;
+      const bodyBounds = body.getBoundingClientRect();
+      if (anchor.bottom <= bodyBounds.top || anchor.top >= bodyBounds.bottom) {
+        close();
+        return;
+      }
+      const below = viewportHeight - anchor.bottom - inset;
+      const above = anchor.top - inset;
+      const placeAbove = rules.scrollHeight + 2 > below && above > below;
+
+      rules.style.maxHeight = `${Math.max(0, placeAbove ? above : below)}px`;
+      const left = Math.max(inset, Math.min(anchor.right - rules.offsetWidth, viewportWidth - rules.offsetWidth - inset));
+      const top = placeAbove ? anchor.top - rules.offsetHeight : anchor.bottom;
+      rules.style.left = `${left}px`;
+      rules.style.top = `${top}px`;
+    };
+    const setOpen = (open: boolean) => {
+      if (open === !rules.hidden) return;
+      if (!open && usePopover) rules.hidePopover();
+      rules.hidden = !open;
+      trigger.setAttribute('aria-expanded', String(open));
+      if (open && usePopover) {
+        rules.showPopover();
+        positionRules();
+      }
+    };
+    const close = () => {
+      pinned = false;
+      setOpen(false);
+    };
+
+    trigger.addEventListener('pointerenter', event => {
+      if (event.pointerType === 'mouse') setOpen(true);
+    });
+    experience.addEventListener('pointerleave', () => {
+      if (!pinned && !experience.querySelector(':focus-visible')) close();
+    });
+    trigger.addEventListener('focus', () => {
+      if (trigger.matches(':focus-visible')) setOpen(true);
+    });
+    experience.addEventListener('focusout', event => {
+      if (!experience.contains(event.relatedTarget as Node | null)) close();
+    });
+    trigger.addEventListener('click', () => {
+      pinned = !pinned;
+      setOpen(pinned);
+    });
+    modal.addEventListener('click', event => {
+      if (!experience.contains(event.target as Node)) close();
+    });
+    modal.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || rules.hidden) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (rules.contains(document.activeElement)) trigger.focus({ preventScroll: true });
+      close();
+    });
+    if (usePopover) {
+      body.addEventListener('scroll', positionRules, { passive: true, signal: events.signal });
+      window.addEventListener('resize', positionRules, { signal: events.signal });
+    }
+    this.disposeExperienceHelp = () => {
+      events.abort();
+      close();
+      this.disposeExperienceHelp = null;
+    };
   }
 
   // ==================== 图鉴系统 ====================
@@ -527,6 +702,8 @@ export class HomePage {
   private _profileDataUnsub: (() => void) | null = null;
 
   show(): void {
+    this.el.style.setProperty('--pve-mode-background', toCssImage(getPVEBackground('mondstadt', '蒙德')));
+    this.el.style.setProperty('--pvp-mode-background', toCssImage(getRandomPVPBackground()));
     this.el.classList.add('active');
     // 清理旧的监听
     if (this._profileDataUnsub) { this._profileDataUnsub(); this._profileDataUnsub = null; }

@@ -22,6 +22,16 @@ export interface Account {
   createdAt: number;
 }
 
+/** PVP 胜率统计 */
+export interface PVPStats {
+  totalGames: number;     // 总对局
+  totalWins: number;      // 总胜场
+  monarch: { games: number; wins: number };   // 主公
+  minister: { games: number; wins: number };  // 忠臣
+  rebel: { games: number; wins: number };     // 反贼
+  traitor: { games: number; wins: number };   // 内奸
+}
+
 /** 经验等级系统
  * 1-55级：每级升下一级所需经验 = 当前等级 × 100
  * 56级：56000 | 57级：57000 | 58级：58000 | 59级：59000 | 60级封顶
@@ -121,7 +131,7 @@ export class AccountManager {
     return crypto.randomBytes(32).toString('hex');
   }
 
-  private sanitize(acc: Account): Omit<Account, 'passwordHash'> & { pveStars?: Record<number, number>; settings?: Record<string, any> } {
+  private sanitize(acc: Account): Omit<Account, 'passwordHash'> & { pveStars?: Record<number, number>; settings?: Record<string, any>; stats?: PVPStats } {
     const { passwordHash, ...rest } = acc as any;
     if (rest.level === undefined) rest.level = 1;
     if (rest.exp === undefined) rest.exp = 0;
@@ -224,6 +234,29 @@ export class AccountManager {
     (account as any).pveStars = stars;
     this.saveToFile();
     return true;
+  }
+
+  /** 更新 PVP 胜率统计 */
+  updatePVPStats(accountId: string, role: string, won: boolean): void {
+    const account = this.accounts.get(accountId);
+    if (!account) return;
+    const stats: PVPStats = (account as any).stats || {
+      totalGames: 0, totalWins: 0,
+      monarch: { games: 0, wins: 0 },
+      minister: { games: 0, wins: 0 },
+      rebel: { games: 0, wins: 0 },
+      traitor: { games: 0, wins: 0 },
+    };
+    stats.totalGames++;
+    if (won) stats.totalWins++;
+    const roleKey = role.toLowerCase() as keyof PVPStats;
+    if (roleKey in stats && roleKey !== 'totalGames' && roleKey !== 'totalWins') {
+      const r = stats[roleKey] as { games: number; wins: number };
+      r.games++;
+      if (won) r.wins++;
+    }
+    (account as any).stats = stats;
+    this.saveToFile();
   }
 
   /** 保存用户设置 */

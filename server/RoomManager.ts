@@ -3,6 +3,7 @@
 // ============================================================
 
 import * as crypto from 'crypto';
+import type { PublicRoom } from '../src/network/RoomProtocol.js';
 
 export interface RoomSlot {
   index: number;        // 0-7
@@ -282,6 +283,28 @@ export class RoomManager {
     const room = this.rooms.get(roomId);
     if (!room) return null;
     return { ...room };
+  }
+
+  getPublicRoom(roomId: string): PublicRoom | null {
+    const room = this.rooms.get(roomId);
+    if (!room) return null;
+    return {
+      ...this.makeRoomInfo(room),
+      slots: room.slots.map(slot => {
+        const occupied = slot.token !== null;
+        return {
+          index: slot.index,
+          occupied,
+          accountName: occupied ? slot.accountName : null,
+          avatar: occupied ? slot.avatar : null,
+          nickname: occupied ? slot.nickname : null,
+          ready: slot.ready,
+          isHost: slot.isHost,
+          connected: slot.connected,
+          heroId: occupied ? slot.heroId : undefined,
+        };
+      }),
+    };
   }
 
   /** 删除房间 */

@@ -49,7 +49,10 @@ class SocketManager {
 
   /** 连接到服务器 */
   connect(url?: string): void {
-    if (this.socket?.connected) return;
+    if (this.socket) {
+      if (!this.socket.connected) this.socket.connect();
+      return;
+    }
 
     // 开发环境通过 Vite proxy 连接（同端口3000），生产环境连同源或自定义地址
     const serverUrl = url || window.location.origin;
@@ -84,9 +87,10 @@ class SocketManager {
 
     this.socket.on('connect_error', (err) => {
       console.error(`[SocketManager] 连接失败:`, err.message);
+      this.emitLocal('__connection_error', { reason: err.message });
     });
 
-    this.socket.on('reconnect', () => {
+    this.socket.io.on('reconnect', () => {
       console.log('[SocketManager] 重连成功');
       this.emitLocal('__reconnected');
       for (const cb of this.reconnectCallbacks) cb();
@@ -95,18 +99,22 @@ class SocketManager {
     // 服务器事件透传
     const serverEvents = [
       'login_result', 'signup_result', 'logged_in', 'logged_out', 'auth_failed',
-      'profile_updated',
+      'profile_updated', 'profile_data',
       'room_list', 'room_created', 'room_joined', 'room_left',
       'room_update', 'error_msg', 'reconnected',
       'hero_select_start', 'hero_select_result',
       'hero_select_waiting', 'hero_select_monarch_picked',
       'game_start', 'game_event', 'game_over',
-      'prompt',  // RemotePlayerDriver的请求
+      'chat_message',
+      'prompt', 'prompt_closed',  // RemotePlayerDriver请求与结束通知
     ];
 
     for (const event of serverEvents) {
       this.socket.on(event, (data: any) => {
-        console.log(`[SocketManager] 收到服务端事件: "${event}"`, typeof data === 'object' ? JSON.stringify(data) : data);
+        // Authentication payloads contain bearer tokens; keep them out of logs.
+        if (!['login_result', 'signup_result', 'logged_in'].includes(event)) {
+          console.log(`[SocketManager] 收到服务端事件: "${event}"`);
+        }
         this.emitLocal(event, data);
       });
     }
@@ -142,11 +150,22 @@ class SocketManager {
   emitWithAck(event: string, data?: any): Promise<any> {
     return new Promise((resolve) => {
       if (this.socket?.connected) {
-        this.socket.emit(event, data, (ack: any) => resolve(ack));
+        this.socket.timeout(10000).emit(event, data, (error: Error | null, ack: any) =>
+          resolve(error ? { success: false, reason: '服务器响应超时，请稍后重试' } : ack));
       } else {
         console.warn(`[SocketManager] 未连接，无法发送 ${event}`);
         resolve(null);
       }
+    });
+  }
+
+  /** Chat acknowledgments expire so a lost connection cannot leave the composer pending forever. */
+  requestChat(event: 'chat_send' | 'chat_history', data: unknown): Promise<any> {
+    return new Promise(resolve => {
+      if (!this.socket?.connected) { resolve({ success: false, reason: '连接已断开，请重连后重试' }); return; }
+      this.socket.timeout(5000).emit(event, data, (error: Error | null, result: unknown) => {
+        resolve(error ? { success: false, reason: '确认超时，可点击重试' } : result);
+      });
     });
   }
 

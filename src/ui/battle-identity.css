@@ -1,0 +1,67 @@
+.game-page .seat-portrait {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.game-page .seat-role-chip[data-faction="Ally"] { background: #1c6158ed; }
+.game-page .seat-role-chip[data-faction="Enemy"] { background: #913c3aed; }
+
+.seat-role-chip[data-role="Monarch"] { --seat-role-fill: #b9342c; }
+:is(.seat-role-chip[data-role="Minister"], [data-mark="忠"]) {
+  --seat-role-fill: #efb65c;
+  --seat-role-ink: #57350e;
+}
+:is(.seat-role-chip[data-role="Rebel"], [data-mark="反"]) { --seat-role-fill: #256b43; }
+:is(.seat-role-chip[data-role="Traitor"], [data-mark="内"]) { --seat-role-fill: #285d9c; }
+.game-page .seat-role-chip:is([data-role], [data-mark]) {
+  background: var(--seat-role-fill, #213941ec);
+  color: var(--seat-role-ink, #fbf7e9);
+}
+
+.game-page .seat-role-mark {
+  min-width: 24px;
+  border-style: dashed;
+  font-family: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.game-page .seat-role-mark:hover,
+.game-page .seat-role-mark:focus-visible {
+  outline: 2px solid #fae1a9;
+  outline-offset: 1px;
+}
+
+.seat-role-picker {
+  position: fixed;
+  z-index: 600;
+  inset: auto;
+  width: max-content;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #acbdb0;
+  border-radius: 8px;
+  background: #f8f7ed;
+  color: #25444b;
+  box-shadow: 0 6px 20px #142d4052;
+}
+
+.seat-role-picker strong { font-size: 12px; }
+.seat-role-options { display: flex; gap: 4px; margin-top: 5px; }
+.seat-role-options button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 3px 5px;
+  border: 1px solid #b1c5bc;
+  border-radius: 4px;
+  background: var(--seat-role-fill, #e8efe7);
+  color: var(--seat-role-ink, #fff9ee);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.seat-role-options .seat-role-clear { color: #25444b; font-size: 11px; }
+.seat-role-options button:hover { filter: brightness(1.13); }
+.seat-role-options button[aria-pressed="true"] { outline: 2px solid #365e55; outline-offset: 1px; }
+.seat-role-options button:focus-visible { outline: 2px solid #126355; outline-offset: 1px; }

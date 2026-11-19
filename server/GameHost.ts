@@ -12,10 +12,12 @@ import { DeckManager } from '../src/core/DeckManager.js';
 import { CardEffectManager } from '../src/core/CardEffectManager.js';
 import { DamageSystem } from '../src/core/DamageSystem.js';
 import { EquipEffectManager } from '../src/core/EquipEffectManager.js';
+import { GameSession } from '../src/core/GameSession.js';
 import { GameFlowController } from '../src/core/GameFlowController.js';
 import { SkillManager } from '../src/core/skills/SkillManager.js';
 import { DelayedAIDriver } from '../src/ai/DelayedAIDriver.js';
 import { RemotePlayerDriver } from './RemotePlayerDriver.js';
+import { serializeForPvpViewer } from './PvpVisibility.js';
 import { VoiceManager } from '../src/audio/VoiceManager.js';
 import { CARD_DATA } from '../src/data/CardData.js';
 import { HeroData, getHeroById } from '../src/data/heroes.js';
@@ -35,6 +37,7 @@ export class GameHost {
   private roomId: string;
   private io: SocketIOServer;
   private eventBus!: EventBus;
+  private session = new GameSession();
   private deck!: DeckManager;
   private cardEffectManager!: CardEffectManager;
   private damageSystem!: DamageSystem;
@@ -173,17 +176,17 @@ export class GameHost {
     this.drivers = new Map();
     for (const [pid, slotInfo] of this.playerSlotMap) {
       if (slotInfo.isAI) {
-        this.drivers.set(pid, new DelayedAIDriver(pid, () => 1200));
+        this.drivers.set(pid, new DelayedAIDriver(pid, () => 1200, this.session));
       } else if (slotInfo.socketId) {
         const socket = this.io.sockets.sockets.get(slotInfo.socketId);
         if (socket) {
-          this.drivers.set(pid, new RemotePlayerDriver(pid, socket));
+          this.drivers.set(pid, new RemotePlayerDriver(pid, socket, this.session));
         } else {
           // 断线了，用AI暂代
-          this.drivers.set(pid, new DelayedAIDriver(pid, () => 1200));
+          this.drivers.set(pid, new DelayedAIDriver(pid, () => 1200, this.session));
         }
       } else {
-        this.drivers.set(pid, new DelayedAIDriver(pid, () => 1200));
+        this.drivers.set(pid, new DelayedAIDriver(pid, () => 1200, this.session));
       }
     }
 
@@ -200,14 +203,13 @@ export class GameHost {
     (this.damageSystem.skillManager as any) = this.skillManager as any;
 
     // 铁索传导回调
-    this.damageSystem.onTransmitChain = async (target, damage, sourceCard, source) => {
+    this.damageSystem.onTransmitChain = (target, damage, sourceCard, source) =>
       this.cardEffectManager.transmitChainedDamage(target, damage, sourceCard, source, false);
-    };
 
     // GameFlowController
     this.flowController = new GameFlowController(
       this.players, this.deck, this.eventBus, this.cardEffectManager,
-      this.damageSystem, this.equipManager, this.drivers
+      this.damageSystem, this.equipManager, this.drivers, this.session
     );
     (this.flowController.skillManager as any) = this.skillManager as any;
 
@@ -215,14 +217,6 @@ export class GameHost {
     // 此处仅保留回合间延迟，aiActionDelayMs 归零避免双重叠加
     this.flowController.turnDelayMs = 2500;       // 回合间 2.5 秒
     this.flowController.aiActionDelayMs = 0;      // DelayedAIDriver 已覆盖每次决策延迟
-
-    // 设置胜负回调
-    this.damageSystem.setGameOverCallback((winner) => {
-      if (winner && !this.flowController.gameOverWinner) {
-        this.flowController.gameOverWinner = winner;
-        this.eventBus.emit(GameEvent.GameOver, { winner });
-      }
-    });
 
     // ==================== 转发事件到各客户端 ====================
     this.registerEventForwarding();
@@ -255,9 +249,12 @@ export class GameHost {
             },
           };
 
+          // 私有技能日志只转发给该事件指定的玩家。
+          const visibleTo = eventData.data?.visibleTo;
           // 对每个真人玩家：脱敏后即时发送
           for (const [pid, slotInfo] of this.playerSlotMap) {
             if (slotInfo.isAI || !slotInfo.socketId) continue;
+            if (Array.isArray(visibleTo) && !visibleTo.includes(pid)) continue;
             const sanitized = this.sanitizeEventForPlayer(enrichedData, pid);
             this.io.to(slotInfo.socketId).emit('game_event', sanitized);
           }
@@ -270,61 +267,47 @@ export class GameHost {
 
   /** 为特定玩家脱敏事件数据 */
   private sanitizeEventForPlayer(eventData: any, viewerPlayerId: number): any {
-    // 深度克隆（移除 cardSource 双向引用防止循环序列化：
-    //   Card.cardSource → Player，Player.equipZone[X] → Card 形成闭环）
-    const cloned = JSON.parse(JSON.stringify(eventData, (key, value) => {
-      if (key === 'cardSource') return null;
-      return value;
-    }));
+    const cloned = serializeForPvpViewer(eventData, viewerPlayerId);
 
-    // 注入技能标记数据到玩家对象（玉璋/无想/空月/降魔封印等）
+    // 注入技能标记数据到玩家对象（全部状态标记，确保PVP客户端可用）
     const injectSkillMarks = (p: any) => {
-      const data = (this.skillManager as any).getData?.(p.id);
+      p.attachedCardCount = this.skillManager?.getAttachedCardCount(p) ?? 0;
+      const data = this.skillManager?.getData(p.id);
       if (data) {
         if (data.jadeCount > 0) p._jadeCount = data.jadeCount;
         if (data.musouCount > 0) p._musouCount = data.musouCount;
         if (data.emptyMoonCount > 0) p._emptyMoonCount = data.emptyMoonCount;
-        if (data.sealedSuits && data.sealedSuits.length > 0) p._sealedSuits = [...data.sealedSuits];
+        if (data.frostMoonCount > 0) p._frostMoonCount = data.frostMoonCount;
+        if (data.hasFireworkMark) p._hasFireworkMark = true;
+        if (data.sealedSuits && Object.values(data.sealedSuits).some(Boolean)) p._sealedSuits = { ...data.sealedSuits };
         if (data.contractPartnerId !== undefined) p._contractPartnerId = data.contractPartnerId;
+        if (data.leaderActive) { p._leaderActive = true; p._leaderDamageTaken = data.leaderDamageTaken || 0; }
+        if (data.butterflyActive) p._butterflyActive = true;
+        if (data.nilouStance) p._nilouStance = data.nilouStance;
+        if (data.mapleLeaves && data.mapleLeaves.length > 0) p._mapleLeaves = data.mapleLeaves.length;
+        if (data.knowledgeCards && data.knowledgeCards.length > 0) p._knowledgeCards = data.knowledgeCards.length;
+        if (data.mercenaryActive) { p._mercenaryActive = true; p._mercenaryTargetId = data.mercenaryTargetId; }
+        if (data.iceFeatherCount > 0) p._iceFeatherCount = data.iceFeatherCount;
       }
       return p;
     };
 
     if (cloned.data?.players) {
-      cloned.data.players = cloned.data.players.map((p: any) =>
-        injectSkillMarks(this.sanitizePlayerForViewer(p, viewerPlayerId))
-      );
+      cloned.data.players = cloned.data.players.map(injectSkillMarks);
     }
     if (cloned.players) {
-      cloned.players = cloned.players.map((p: any) =>
-        injectSkillMarks(this.sanitizePlayerForViewer(p, viewerPlayerId))
-      );
+      cloned.players = cloned.players.map(injectSkillMarks);
     }
     // 处理嵌套在 event data 中的 players
     if (cloned.data && typeof cloned.data === 'object') {
       for (const key of Object.keys(cloned.data)) {
         if (cloned.data[key] && typeof cloned.data[key] === 'object' && cloned.data[key].players) {
-          cloned.data[key].players = cloned.data[key].players.map((p: any) =>
-            injectSkillMarks(this.sanitizePlayerForViewer(p, viewerPlayerId))
-          );
+          cloned.data[key].players = cloned.data[key].players.map(injectSkillMarks);
         }
       }
     }
 
     return cloned;
-  }
-
-  /** 根据视角玩家脱敏单个玩家状态 */
-  private sanitizePlayerForViewer(player: any, viewerPlayerId: number): any {
-    if (player.isDead) return player; // 阵亡：全部可见
-    if (player.id === viewerPlayerId) return player; // 自己：全部可见
-    if (player.role === 'Monarch' || player.role === RoleType.Monarch) return player; // 主公：全部可见
-
-    // 隐藏身份，但保留英雄名/heroId/region 和玩家昵称（名字不需要隐藏）
-    return {
-      ...player,
-      role: 'Unknown',
-    };
   }
 
   /** 根据 socketId 获取对应的 playerId */
@@ -339,7 +322,7 @@ export class GameHost {
 
   /** 为特定视角玩家生成脱敏后的玩家列表 */
   getSanitizedPlayers(viewerPlayerId: number): any[] {
-    return this.players.map(p => this.sanitizePlayerForViewer(p, viewerPlayerId));
+    return this.sanitizeEventForPlayer({ players: this.players }, viewerPlayerId).players;
   }
 
   /** 处理断线：换AI接替，标记逃跑 */
@@ -351,12 +334,14 @@ export class GameHost {
     if (!slotInfo || slotInfo.isAI) return;
 
     slotInfo.socketId = null;
+    const oldDriver = this.drivers?.get(playerId);
+    if (oldDriver instanceof RemotePlayerDriver) oldDriver.dispose();
 
     if (this.gameStarted) {
       // 游戏进行中：标记逃跑，用AI接替
       this.escapedPlayerIds.add(playerId);
       if (this.drivers) {
-        this.drivers.set(playerId, new DelayedAIDriver(playerId, () => 1200));
+        this.drivers.set(playerId, new DelayedAIDriver(playerId, () => 1200, this.session));
       }
       console.log(`[GameHost] Player ${playerId} 逃跑，AI接替`);
     }
@@ -386,7 +371,7 @@ export class GameHost {
       if (existing instanceof RemotePlayerDriver) {
         existing.updateSocket(socket);
       } else {
-        this.drivers.set(playerId, new RemotePlayerDriver(playerId, socket));
+        this.drivers.set(playerId, new RemotePlayerDriver(playerId, socket, this.session));
       }
       console.log(`[GameHost] Player ${playerId} 重连，恢复RemoteDriver`);
     }
@@ -417,6 +402,12 @@ export class GameHost {
     return undefined;
   }
 
+  /** PVP 客户端只依赖服务端确认的主公地区选择 BGM，避免从本地座位或隐藏身份推断。 */
+  getMonarchRegion(): string {
+    if (this.monarchPlayerId < 0) return '';
+    return this.players.find(player => player.id === this.monarchPlayerId)?.region || '';
+  }
+
   /** 开始游戏 */
   async start(): Promise<void> {
     this.gameStarted = true;
@@ -431,6 +422,11 @@ export class GameHost {
 
   /** 终止游戏（所有玩家离开时调用） */
   abort(): void {
+    this.session.dispose();
+    this.eventBus?.clear();
+    for (const driver of this.drivers?.values() ?? []) {
+      if (driver instanceof RemotePlayerDriver) driver.dispose();
+    }
     if (this.flowController) {
       this.flowController.abort();
     }

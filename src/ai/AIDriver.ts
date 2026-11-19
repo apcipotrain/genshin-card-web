@@ -9,11 +9,12 @@ import {
   RoleType, SuitType, ElementType, GameContextSnapshot, ZoneSelection
 } from '../core/types';
 import { isSlash, getCardDetail, getCardColor, ColorType, getMagicSubType, MagicTimeType } from '../core/Card';
-import { getWeaponRange, hasHandCards, getRoleChineseName } from '../core/Player';
+import { areRescueTeammates, getWeaponRange, hasHandCards, getRoleChineseName } from '../core/Player';
 import { getDistance, isInRange, getAlivePlayers } from '../core/DistanceCalc';
 
 export class AIDriver implements IPlayerDriver {
   readonly playerId: number;
+  readonly isAutomated = true;
   private lastCtx: GameContextSnapshot | null = null;
 
   constructor(playerId: number) {
@@ -395,6 +396,8 @@ export class AIDriver implements IPlayerDriver {
       '灵使',    // 菈乌玛-灵使：给霜月标记保护
       '幽客',    // 夜兰-幽客：查看身份（信息技能，对友方减少敌意）
       '炼金',    // 阿贝多-炼金：给队友锻造装备
+      '生论',    // 提纳里-生论：给队友额外回血
+      '护士',    // 希格雯-护士：弃桃给队友回血
       // 闲游为中性，默认选敌人作为目标交换位置更有战术价值
     ];
     return defensiveReasons.some(r => reason.includes(r));
@@ -441,16 +444,11 @@ export class AIDriver implements IPlayerDriver {
         return null;
       }
       case '桃': {
-        // AI 在濒死救援时：同阵营才出桃；自救时无条件
-        const dyingId = ctx.dyingPlayerId;
-        if (dyingId !== undefined && dyingId !== me.id) {
-          const dyingPlayer = ctx.players.find(p => p.id === dyingId);
-          if (dyingPlayer && this.isEnemy(me, dyingPlayer)) {
-            return null; // 不救敌人
-          }
+        const dyingPlayer = ctx.players.find(p => p.id === ctx.dyingPlayerId);
+        if (!dyingPlayer || (dyingPlayer.id !== me.id && !areRescueTeammates(me, dyingPlayer))) {
+          return null;
         }
-        const peach = me.handCards.find(c => c.name === '桃');
-        return peach ?? null;
+        return me.handCards.find(c => c.name === '桃') ?? null;
       }
       case '酒': {
         const wine = me.handCards.find(c => c.name === '酒');
@@ -786,7 +784,7 @@ export class AIDriver implements IPlayerDriver {
 
   // ======================== 阵营判定辅助 ========================
 
-  private isEnemy(me: PlayerState, other: PlayerState): boolean {
+  isEnemy(me: PlayerState, other: PlayerState): boolean {
     // PVE模式：基于阵营（faction）判定敌友
     const myFaction = (me as any).faction as string | undefined;
     const otherFaction = (other as any).faction as string | undefined;
@@ -1301,6 +1299,9 @@ export class AIDriver implements IPlayerDriver {
         const hasEquip = Object.values(me.equipZone).some(v => v !== null);
         return hasEquip && enemies.length > 0;
       }
+
+      case 'sigewinne_nurse':
+        return allies.some(ally => ally.hp < ally.maxHp && areRescueTeammates(me, ally));
 
       default:
         return true; // 未知技能默认发动

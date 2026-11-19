@@ -39,7 +39,7 @@
   transition: opacity 1.2s ease-in-out;
 }
 
-.game-page > *:not(.game-bg) {
+.game-page > :is(#game-main-area, .game-sidebar) {
   position: relative;
   z-index: 1;
 }
@@ -687,7 +687,7 @@
   100% { transform: scale(0.5) rotate(0deg); opacity: 0; }
 }
 
-/* ========== 右侧面板（日志 + 聊天 + 技能信息） ========== */
+/* ========== 右侧面板（对局纪事 + 旅伴频道） ========== */
 .game-sidebar {
   flex: 0 0 300px;
   display: flex;
@@ -764,59 +764,6 @@
   color: var(--text-dim);
   text-align: center;
   padding: 8px 0;
-}
-
-/* ---- 侧栏技能区 ---- */
-.sidebar-section {
-  padding: 10px 14px;
-  flex-shrink: 0;
-}
-.sidebar-section h4 {
-  font-size: 11px;
-  color: var(--gold-dim);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-.sidebar-skills-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-/* 技能槽位（侧栏内） */
-.skill-slot {
-  padding: 5px 10px;
-  border-radius: 5px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  font-size: 11px;
-  cursor: default;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-.skill-slot.dim { opacity: 0.45; }
-.skill-slot.usable { opacity: 0.85; }
-.skill-slot.empty-skill {
-  width: 36px;
-  height: 24px;
-  border-style: dashed;
-  border-color: rgba(255,255,255,0.04);
-}
-.skill-name {
-  font-weight: bold;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-.skill-type-tag {
-  font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.08);
-  color: var(--text-dim);
 }
 
 /* ========== 底部玩家区域（装备左 + 手牌中 + 技能右 三列并列） ========== */
@@ -1185,25 +1132,6 @@
   transform: scale(1.05);
 }
 
-/* 弃牌进度标签 */
-.discard-progress-label {
-  display: inline-block;
-  padding: 10px 20px;
-  border-radius: var(--radius-sm);
-  background: rgba(229, 57, 53, 0.2);
-  border: 2px solid #e53935;
-  color: #ff8a80;
-  font-size: 14px;
-  font-weight: bold;
-  font-family: inherit;
-  white-space: nowrap;
-  animation: discard-label-pulse 0.8s ease-in-out infinite;
-}
-@keyframes discard-label-pulse {
-  0%, 100% { border-color: #e53935; box-shadow: 0 0 6px rgba(229, 57, 53, 0.3); }
-  50% { border-color: #ff5252; box-shadow: 0 0 16px rgba(229, 57, 53, 0.6); }
-}
-
 /* 无懈可击放弃按钮 */
 .nullify-pass-bar {
   position: absolute;
@@ -1537,19 +1465,24 @@
 /* ========== 选将界面 ========== */
 .hero-select-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
+  inset: 0;
   background: rgba(0, 0, 0, 0.9);
   z-index: 2000;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
+
+.hero-select-overlay[hidden] { display: none; }
 
 .hero-select-panel {
   text-align: center;
-  padding: 36px;
-  max-width: 960px;
+  margin-block: auto;
+  padding: clamp(16px, 3vw, 36px);
+  max-width: min(960px, 100%);
+  min-width: 0;
 }
 
 .hero-select-panel h2 { font-size: 32px; color: var(--gold); margin-bottom: 10px; }
@@ -1902,45 +1835,67 @@
   text-shadow: 0 0 10px rgba(0,0,0,0.8);
 }
 
-/* 选择目标金光 */
-.target-beam {
-  position: fixed;
-  pointer-events: none;
-  z-index: 150;
-  width: 6px;
-  background: linear-gradient(180deg, rgba(255, 215, 0, 0), rgba(255, 215, 0, 0.9), rgba(255, 215, 0, 0));
-  box-shadow: 0 0 20px rgba(255, 215, 0, 0.6), 0 0 40px rgba(255, 215, 0, 0.3);
-  animation: beamPulse 0.5s ease-in-out infinite alternate;
-  transform-origin: top center;
-}
-
-@keyframes beamPulse {
-  0% { opacity: 0.6; }
-  100% { opacity: 1; }
-}
-
-/* 出牌时座位间黄光连线 */
+/* 目标确认与出牌连线 */
+.target-beam,
 .card-target-beam {
   position: fixed;
   pointer-events: none;
-  z-index: 180;
-  height: 4px;
-  background: linear-gradient(90deg,
-    rgba(255, 200, 0, 0) 0%,
-    rgba(255, 200, 0, 0.9) 20%,
-    rgba(255, 230, 0, 1) 50%,
-    rgba(255, 200, 0, 0.9) 80%,
-    rgba(255, 200, 0, 0) 100%
-  );
-  box-shadow: 0 0 15px rgba(255, 215, 0, 0.7), 0 0 30px rgba(255, 180, 0, 0.4);
-  animation: cardBeamGlow 0.3s ease-out;
-  border-radius: 2px;
+  height: 0;
+  transform-origin: left center;
 }
 
-@keyframes cardBeamGlow {
-  0% { opacity: 0; filter: blur(4px); }
-  50% { opacity: 1; filter: blur(0); }
-  100% { opacity: 0; filter: blur(2px); }
+.target-beam { z-index: 150; }
+.card-target-beam { z-index: 180; animation: cardBeamFade 1.2s ease-out both; }
+
+.target-beam::before,
+.card-target-beam::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  border-radius: 999px;
+}
+
+.target-beam::before {
+  top: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, #61d8c84d, #b3fff0 54%, #ffdda0);
+  box-shadow: 0 0 0 1px #17343e66, 0 0 8px #5eeac488;
+}
+
+.card-target-beam::before {
+  top: -2px;
+  height: 4px;
+  background: linear-gradient(90deg, #62d5c6, #baffec 42%, #fff1bf 78%, #ffc57a);
+  box-shadow: 0 0 0 1px #17343e99, 0 0 10px #5ce7caa6, 0 0 20px #ffcc735c;
+}
+
+.card-target-beam::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 22%;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #fffdf2 88%, #fffdf200);
+  animation: cardBeamSweep .42s ease-out both;
+}
+
+@keyframes cardBeamFade {
+  0% { opacity: 0; }
+  12%, 42% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes cardBeamSweep {
+  0% { left: 0; opacity: 0; }
+  24%, 76% { opacity: 1; }
+  100% { left: 78%; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-target-beam { animation: none; }
+  .card-target-beam::after { content: none; }
 }
 
 /* ========== 人物信息弹窗（不超过2/3屏幕，左图右文） ========== */
@@ -2044,6 +1999,13 @@
   margin-bottom: 8px;
   font-weight: bold;
 }
+.hero-info-divider {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 10px 0;
+}
+.hero-info-player {
+  padding-top: 2px;
+}
 .hero-info-skills {
   display: flex;
   flex-direction: column;
@@ -2064,39 +2026,35 @@
 
 /* ========== 技能名浮空动画 ========== */
 .skill-float-text {
-  position: absolute;
+  position: fixed;
   pointer-events: none;
-  z-index: 200;
-  color: var(--gold);
-  font-size: 20px;
-  font-weight: 900;
-  letter-spacing: 2px;
-  text-shadow:
-    0 0 10px rgba(255, 200, 0, 0.9),
-    0 0 20px rgba(255, 200, 0, 0.5),
-    0 2px 4px rgba(0, 0, 0, 0.8);
-  white-space: nowrap;
-  animation: skillFloatUp 1.6s ease-out forwards;
+  z-index: 220;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 150px;
+  max-width: min(240px, calc(100vw - 24px));
+  padding: 9px 15px 11px;
+  border: 1px solid var(--skill-accent, #eed79e);
+  border-left-width: 3px;
+  border-radius: 4px 14px 4px 14px;
+  background: linear-gradient(115deg, rgba(19, 39, 52, .98), rgba(31, 51, 63, .96));
+  box-shadow: 0 6px 24px rgba(8, 22, 35, .3), inset 0 1px rgba(255,255,255,.1);
+  color: #fff9ea;
+  animation: skillFloatUp .28s ease-out backwards;
+  transition: opacity .25s ease, translate .25s ease;
   user-select: none;
 }
+.skill-float-text.is-leaving { opacity: 0; translate: 0 -8px; }
+.skill-announcement-meta { display: flex; justify-content: space-between; gap: 14px; margin-bottom: 5px; color: #d7e4e8; font: 11px/1.5 sans-serif; letter-spacing: .5px; }
+.skill-announcement-meta > :last-child { color: var(--skill-accent, #eed79e); font-size: 10px; }
+.skill-announcement-names { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.skill-announcement-name { overflow-wrap: anywhere; color: #fff7df; font: 700 25px/1.3 'STZhongsong', 'Songti SC', 'SimSun', serif; letter-spacing: 3px; text-shadow: 0 2px 3px rgba(0,0,0,.55); }
+.skill-announcement-name small { display: inline-block; margin-left: 5px; color: var(--skill-accent, #eed79e); font: 600 12px/1 sans-serif; letter-spacing: 0; vertical-align: middle; }
 
 @keyframes skillFloatUp {
-  0% {
-    opacity: 0;
-    transform: translateY(8px) scale(0.8);
-  }
-  15% {
-    opacity: 1;
-    transform: translateY(0) scale(1.05);
-  }
-  25% {
-    transform: translateY(-4px) scale(1);
-  }
-  60% {
-    opacity: 0.9;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-60px) scale(1.2);
-  }
+  from { opacity: 0; transform: translateY(8px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skill-float-text { animation: none; transition: none; }
 }

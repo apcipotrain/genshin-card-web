@@ -8,6 +8,17 @@ import './ui/chapters.css';
 import './ui/match.css';
 import './ui/game.css';
 import './ui/login.css';
+import './ui/travel.css';
+import './ui/pvp-lobby.css';
+import './ui/pvp-waiting.css';
+import './ui/pvp-hero-select.css';
+import './ui/battle-polish.css';
+import './ui/battle-feedback.css';
+import './ui/battle-responsive.css';
+import './ui/battle-seats.css';
+import './ui/battle-identity.css';
+import './ui/battle-hud.css';
+import './ui/pvp-battle.css';
 
 import { router, RouteState } from './ui/router';
 import { HomePage } from './ui/HomePage';

@@ -18,6 +18,7 @@ import { getCardDetail } from './Card';
 import { findNextAlivePlayer } from './DistanceCalc';
 import { SuitType, ElementType, Faction } from './types';
 import { VoiceManager } from '../audio/VoiceManager';
+import { GameResolutionEnded, GameSession, GameSessionCancelled } from './GameSession';
 
 export class GameFlowController {
   private allPlayers: PlayerState[];
@@ -30,7 +31,7 @@ export class GameFlowController {
 
   // SkillManager 注入
   public skillManager: {
-    onAfterJudge: (player: PlayerState, judgeCard: Card, kitName?: string, effectTriggered?: boolean) => void;
+    onAfterJudge: (player: PlayerState, judgeCard: Card, kitName?: string, effectTriggered?: boolean) => Promise<void>;
     onBeforeJudgeEffect: (judgeCard: Card, judgeTarget: PlayerState) => Promise<{ modified: boolean; card: Card }>;
     onTurnStart: (player: PlayerState, ctx: GameContextSnapshot) => Promise<void>;
     onPlayPhaseStart: (player: PlayerState, ctx: GameContextSnapshot) => Promise<void>;
@@ -104,7 +105,8 @@ export class GameFlowController {
     cardEffectManager: CardEffectManager,
     damageSystem: DamageSystem,
     equipManager: EquipEffectManager,
-    drivers: Map<number, IPlayerDriver>
+    drivers: Map<number, IPlayerDriver>,
+    private session: GameSession = new GameSession()
   ) {
     this.allPlayers = players;
     this.deck = deck;
@@ -113,6 +115,14 @@ export class GameFlowController {
     this.damageSystem = damageSystem;
     this.equipManager = equipManager;
     this.drivers = drivers;
+    this.damageSystem.setGameOverCallback((winner) => {
+      if (!this.gameOverWinner) {
+        this.gameOverWinner = winner;
+        this.eventBus.emit(GameEvent.Log, { message: `游戏结束！胜利方：${winner}` });
+        this.eventBus.emit(GameEvent.GameOver, { winner });
+      }
+      throw new GameResolutionEnded();
+    });
   }
 
   // ======================== 游戏初始化 ========================
@@ -120,12 +130,14 @@ export class GameFlowController {
   /** 终止游戏循环（PVE离开时调用） */
   abort(): void {
     this.aborted = true;
+    this.session.dispose();
     if (!this.gameOverWinner) {
       this.gameOverWinner = 'aborted';
     }
   }
 
   async startGame(humanPlayerId?: number, turnOrder?: number[]): Promise<void> {
+    if (!this.session.active) return;
     // 检测 PVE 模式
     const isPVE = this.allPlayers.some(p => (p as any).faction !== undefined);
     if (isPVE) {
@@ -167,16 +179,12 @@ export class GameFlowController {
       else if (victim.role === RoleType.Traitor) stats.traitor = 1;
     };
 
-    // 设置胜负回调
-    this.damageSystem.setGameOverCallback((winner) => {
-      if (winner) {
-        this.gameOverWinner = winner;
-        this.eventBus.emit(GameEvent.GameOver, { winner });
-      }
-    });
-
     // 进入主循环
-    await this.gameLoop();
+    try {
+      await this.gameLoop();
+    } catch (error) {
+      if (!(error instanceof GameSessionCancelled || error instanceof GameResolutionEnded)) throw error;
+    }
   }
 
   private assignRoles(humanPlayerId?: number): void {
@@ -193,9 +201,9 @@ export class GameFlowController {
       }
       if (humanPlayerId !== undefined && humanPlayerId >= 0 && humanPlayerId < this.allPlayers.length) {
         if (this.allPlayers[humanPlayerId].role === RoleType.Monarch) {
-          this.eventBus.emit(GameEvent.Log, { message: '你是主公！' });
+          this.eventBus.emit(GameEvent.Log, { visibleTo: [this.allPlayers[humanPlayerId].id], message: '你是主公！' });
         } else {
-          this.eventBus.emit(GameEvent.Log, { message: `你的身份：${this.getRoleName(this.allPlayers[humanPlayerId].role)}` });
+          this.eventBus.emit(GameEvent.Log, { visibleTo: [this.allPlayers[humanPlayerId].id], message: `你的身份：${this.getRoleName(this.allPlayers[humanPlayerId].role)}` });
         }
       }
       this.eventBus.emit(GameEvent.Log, { message: '身份分配完毕。' });
@@ -238,9 +246,9 @@ export class GameFlowController {
       // 记录人类玩家身份
       if (humanPlayerId !== undefined && humanPlayerId >= 0 && humanPlayerId < this.allPlayers.length) {
         if (humanPlayerId === monarchPreSetIdx) {
-          this.eventBus.emit(GameEvent.Log, { message: '你是主公！' });
+          this.eventBus.emit(GameEvent.Log, { visibleTo: [this.allPlayers[humanPlayerId].id], message: '你是主公！' });
         } else {
-          this.eventBus.emit(GameEvent.Log, { message: `你的身份：${this.getRoleName(this.allPlayers[humanPlayerId].role)}` });
+          this.eventBus.emit(GameEvent.Log, { visibleTo: [this.allPlayers[humanPlayerId].id], message: `你的身份：${this.getRoleName(this.allPlayers[humanPlayerId].role)}` });
         }
       }
       this.eventBus.emit(GameEvent.Log, { message: '身份分配完毕。' });
@@ -273,9 +281,9 @@ export class GameFlowController {
     // 如果人类玩家恰好是主公，记录日志
     if (humanPlayerId !== undefined && humanPlayerId >= 0 && humanPlayerId < this.allPlayers.length) {
       if (this.allPlayers[humanPlayerId].role === RoleType.Monarch) {
-        this.eventBus.emit(GameEvent.Log, { message: '你是主公！' });
+        this.eventBus.emit(GameEvent.Log, { visibleTo: [this.allPlayers[humanPlayerId].id], message: '你是主公！' });
       } else {
-        this.eventBus.emit(GameEvent.Log, { message: `你的身份：${this.getRoleName(this.allPlayers[humanPlayerId].role)}` });
+        this.eventBus.emit(GameEvent.Log, { visibleTo: [this.allPlayers[humanPlayerId].id], message: `你的身份：${this.getRoleName(this.allPlayers[humanPlayerId].role)}` });
       }
     }
 
@@ -381,8 +389,6 @@ export class GameFlowController {
 
     if (this.aborted) {
       this.eventBus.emit(GameEvent.Log, { message: '游戏已中止。' });
-    } else {
-      this.eventBus.emit(GameEvent.Log, { message: `游戏结束！胜利方：${this.gameOverWinner}` });
     }
   }
 
@@ -494,6 +500,7 @@ export class GameFlowController {
       if (this.checkTurnInterrupt(player, '出牌阶段')) return;
 
       await this.playPhase(player);
+      if (this.checkTurnInterrupt(player, '出牌阶段')) return;
 
       // 技能钩子：出牌阶段结束（哥伦比娅-少女）
       if (this.skillManager && !player.isDead) {
@@ -658,7 +665,7 @@ export class GameFlowController {
 
     // 技能钩子：判定生效后（芙宁娜-正义、那维莱特-龙权、莱欧斯利-狱长）
     if (this.skillManager) {
-      this.skillManager.onAfterJudge(player, judgeResult, kit.name, effectTriggered);
+      await this.skillManager.onAfterJudge(player, judgeResult, kit.name, effectTriggered);
     }
 
     if (player.isDead) {
@@ -810,7 +817,7 @@ export class GameFlowController {
     const { bombExploded, moveBomb } = await result;
 
     // 那维莱特-龙权：炸弹判定后摸牌
-    this.skillManager!.onAfterJudge(player, judgeResult, '炸弹', bombExploded);
+    await this.skillManager!.onAfterJudge(player, judgeResult, '炸弹', bombExploded);
 
     // 移除炸弹
     player.judgeZone.splice(indexInZone, 1);
@@ -948,6 +955,7 @@ export class GameFlowController {
         cardsPlayedThisPhase,
       });
 
+      if (this.gameOverWinner || this.aborted) return;
       if (choice === -1) break; // 结束出牌
 
       if (choice === -2 && canUseZhanBa) {
@@ -962,7 +970,7 @@ export class GameFlowController {
         const result = await this.equipManager.tryZhanBaTransformInteractive(player);
         if (result) {
           const { virtualSlash, physicalCards } = result;
-          const success = await this.cardEffectManager.handleActivePlay(virtualSlash, player);
+          const success = await this.resolveActivePlay(virtualSlash, player, physicalCards);
           if (success) {
             // 成功：两张实体牌进弃牌堆
             for (const c of physicalCards) this.deck.sendToDiscard(c);
@@ -1023,6 +1031,7 @@ export class GameFlowController {
           }
         }
 
+        const playedCard = selected;
         this.eventBus.emit(GameEvent.CardPlayed, {
           playerId: player.id,
           card: selected
@@ -1053,10 +1062,10 @@ export class GameFlowController {
           }
         }
 
-        const success = await this.cardEffectManager.handleActivePlay(selected, player);
+        const success = await this.resolveActivePlay(selected, player, [playedCard, selected]);
 
         if (success) {
-          if (!selected.isVirtual && !(selected as any)._daixianClaimed) {
+          if (selected.type !== CardType.Equipment && !selected.isVirtual && !(selected as any)._daixianClaimed) {
             this.deck.sendToDiscard(selected);
           }
           // 奈芙尔-秘闻：检查是否使用了被标记的牌
@@ -1140,6 +1149,25 @@ export class GameFlowController {
     await this.aiExecuteEndOfTurnSkills(player, driver);
   }
 
+  private async resolveActivePlay(card: Card, source: PlayerState, physicalCards: Card[]): Promise<boolean> {
+    try {
+      return await this.cardEffectManager.handleActivePlay(card, source);
+    } catch (error) {
+      if (error instanceof GameResolutionEnded) {
+        // 终局仍需回收本次出牌的实体牌，已归入其他区域的牌保留原处。
+        for (const physical of new Set(physicalCards)) {
+          if (physical.isVirtual || (physical as any)._daixianClaimed
+              || this.deck.discardPile.includes(physical) || this.deck.drawPile.includes(physical)) continue;
+          const inPlayerZone = this.allPlayers.some(player =>
+            player.handCards.includes(physical) || player.judgeZone.includes(physical)
+            || Object.values(player.equipZone).includes(physical));
+          if (!inPlayerZone) this.deck.sendToDiscard(physical);
+        }
+      }
+      throw error;
+    }
+  }
+
   private async discardPhase(player: PlayerState): Promise<void> {
     this.eventBus.emit(GameEvent.PhaseChanged, { playerId: player.id, phase: GamePhase.Discard });
 
@@ -1153,6 +1181,7 @@ export class GameFlowController {
       const driver = this.drivers.get(player.id)!;
       const choice = await driver.promptDiscard(player, {
         players: this.allPlayers,
+        discardHandLimit: handLimit,
         roundCount: this.roundCount,
         currentTurn: this.currentTurnInRound,
         currentPlayerId: player.id,
@@ -1191,6 +1220,6 @@ export class GameFlowController {
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return this.session.delay(ms);
   }
 }

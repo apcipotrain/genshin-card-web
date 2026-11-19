@@ -1,0 +1,219 @@
+.waiting-page.pvp-waiting {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: clamp(25px, 5vh, 58px);
+  padding: clamp(14px, 3vw, 42px);
+  background-color: #173c44;
+  background-image: linear-gradient(145deg, #0e303b4d, #142e36aa), var(--pvp-background-image);
+  color: #23484d;
+}
+
+.pvp-waiting-nav,
+.pvp-waiting-panel {
+  width: min(100%, 1040px);
+  margin-inline: auto;
+  flex: 0 0 auto;
+}
+
+.pvp-waiting-nav {
+  display: flex;
+  align-items: center;
+}
+
+.pvp-waiting button,
+.pvp-waiting select {
+  min-height: 42px;
+  font-family: inherit;
+}
+
+.pvp-waiting button {
+  cursor: pointer;
+  transition: background-color .16s, border-color .16s;
+}
+
+.pvp-waiting button:focus-visible,
+.pvp-waiting select:focus-visible {
+  outline: 2px solid #a67223;
+  outline-offset: 3px;
+}
+
+.pvp-waiting-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid #d4dedcb0;
+  border-radius: 6px;
+  background: #16383be6;
+  color: #f7f6ed;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pvp-waiting-nav button:hover { background: #234c50; }
+.pvp-waiting-back .ui-icon { width: 16px; height: 16px; transform: rotate(180deg); }
+
+.pvp-waiting-panel {
+  overflow: hidden;
+  border: 1px solid #dbddd0;
+  border-radius: 15px;
+  margin-bottom: auto;
+  background: #f8f6ed;
+  box-shadow: 0 20px 65px #10292d5c;
+}
+
+.pvp-waiting-room,
+.pvp-waiting-roster,
+.pvp-waiting-actions {
+  padding-inline: clamp(15px, 3vw, 32px);
+}
+
+.pvp-waiting-room {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+  padding-block: 24px 20px;
+  border-bottom: 1px solid #d7ded0;
+  background: linear-gradient(120deg, #e7eee6, #f8f6ed);
+}
+
+.pvp-waiting-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: #6c5b37;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.pvp-waiting-mode .ui-icon { width: 15px; height: 15px; }
+.pvp-waiting h1 { overflow-wrap: anywhere; font-size: clamp(23px, 4vw, 37px); line-height: 1.2; }
+
+.pvp-room-number {
+  padding: 7px 12px;
+  border: 1px solid #cecbb8;
+  border-radius: 6px;
+  background: #fcfaf1;
+}
+
+.pvp-room-number dt { color: #6e613f; font-size: 11px; }
+.pvp-room-number dd { font-size: 17px; font-weight: 800; letter-spacing: .12em; }
+
+.pvp-waiting-roster { padding-block: 18px 23px; }
+.pvp-roster-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 14px; margin-bottom: 11px; }
+.pvp-roster-heading h2 { font-size: 16px; }
+.pvp-roster-heading p { color: #526866; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.pvp-room-slots {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  list-style: none;
+}
+
+.pvp-room-slot {
+  display: grid;
+  align-content: start;
+  gap: 15px;
+  min-width: 0;
+  min-height: 108px;
+  padding: 11px;
+  border: 1px solid #d7ded2;
+  border-radius: 8px;
+  background: #fffdf5;
+}
+
+.pvp-room-slot[data-state="empty"] { border-style: dashed; background: #eff1e8; }
+.pvp-room-slot[data-state="ready"] { border-color: #afc6b5; }
+.pvp-room-slot[data-state="ai"] { border-color: #ccd7d9; background: #edf3f2; }
+.pvp-room-slot[data-self] { border-color: #3d796d; box-shadow: inset 0 0 0 1px #3d796d; }
+.pvp-slot-heading,
+.pvp-slot-person { display: flex; min-width: 0; align-items: center; }
+.pvp-slot-heading { justify-content: space-between; gap: 4px; }
+.pvp-slot-person { gap: 9px; }
+.pvp-slot-index { color: #526866; font-size: 11px; white-space: nowrap; }
+.pvp-slot-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
+.pvp-slot-tags > span { padding: 1px 5px; border-radius: 4px; font-size: 10px; }
+.pvp-slot-host { background: #f0e7cd; color: #705429; }
+.pvp-slot-self { background: #dfeee5; color: #235f51; }
+
+.pvp-slot-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  height: 40px;
+  overflow: hidden;
+  border: 1px solid #d2dfd7;
+  border-radius: 6px;
+  background: #e2eae3;
+  color: #57726c;
+}
+
+.pvp-room-slot[data-state="ai"] .pvp-slot-avatar { background: #dbe8e9; color: #3a666d; }
+.pvp-room-slot[data-state="empty"] .pvp-slot-avatar { background: transparent; border-style: dashed; }
+.pvp-slot-avatar .ui-icon { width: 20px; height: 20px; }
+.pvp-slot-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.pvp-slot-detail { display: grid; min-width: 0; gap: 3px; }
+.pvp-slot-name { overflow: hidden; font-size: 14px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.pvp-slot-state { color: #526866; font-size: 12px; }
+.pvp-room-slot[data-state="ready"] .pvp-slot-state { color: #2a674f; font-weight: 700; }
+.pvp-room-slot[data-state="offline"] .pvp-slot-state { color: #9a463b; font-weight: 700; }
+
+.pvp-waiting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  padding-block: 15px;
+  border-top: 1px solid #d7ded0;
+  background: #eef1e8;
+}
+
+.pvp-waiting-progress { display: grid; gap: 3px; }
+.pvp-waiting-progress strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.pvp-waiting-progress p { color: #4a635f; font-size: 12px; }
+.pvp-waiting-progress .pvp-room-error { color: #9a463b; }
+.pvp-waiting-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pvp-ai-fill { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
+.pvp-ai-fill[hidden] { display: none; }
+.pvp-ai-fill select { padding: 4px 8px; border: 1px solid #aebbb1; border-radius: 6px; background: #fffdf5; color: #25474d; }
+
+.pvp-ready-button {
+  min-width: 108px;
+  padding-inline: 14px;
+  border: 1px solid #163d42;
+  border-radius: 6px;
+  background: #23484d;
+  color: #fffaf0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pvp-ready-button:hover { background: #315e60; }
+.pvp-ready-button[data-ready="true"] { border-color: #93ada1; background: #f5f8ef; color: #25474d; }
+.pvp-ready-button[data-ready="true"]:hover { background: #e1eee4; }
+.pvp-waiting :is(button, select):disabled { cursor: default; opacity: .58; }
+
+@media (max-width: 760px) {
+  .waiting-page.pvp-waiting { gap: 15px; }
+  .pvp-room-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pvp-room-slot { min-height: 86px; gap: 8px; }
+}
+
+@media (max-width: 370px) {
+  .pvp-slot-avatar { flex-basis: 30px; height: 30px; }
+  .pvp-slot-avatar .ui-icon { width: 15px; height: 15px; }
+  .pvp-slot-person { gap: 5px; }
+  .pvp-room-slot { padding: 7px; }
+  .pvp-slot-name { font-size: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pvp-waiting button { transition: none; }
+}

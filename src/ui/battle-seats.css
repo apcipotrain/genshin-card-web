@@ -1,0 +1,335 @@
+.game-page #game-main-area {
+  container-type: inline-size;
+  --seat-width: clamp(144px, 15cqw, 180px);
+  --hand-height: 210px;
+}
+
+.game-page .battlefield {
+  container-type: size;
+  --seat-height: clamp(148px, min(calc((100cqh - 60px) / 3), calc((100cqh - 260px) / 2)), 216px);
+  --seat-inset: 12px;
+  --seat-gap: 12px;
+}
+
+.game-page .battlefield .seat {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--seat-width);
+  height: var(--seat-height);
+  transition: none;
+}
+
+.game-page .seat-top-row {
+  top: var(--seat-inset);
+  gap: clamp(14px, 2.8cqw, 44px);
+}
+
+.game-page :is(.seat-left-col, .seat-right-col) {
+  justify-content: space-between;
+  gap: var(--seat-gap);
+  transform: none;
+}
+
+.game-page .seat-left-col {
+  top: clamp(12px, calc((100cqh - var(--hand-height) - 2 * var(--seat-height) - 28px) / 2), 88px);
+  bottom: calc(var(--hand-height) + var(--seat-inset));
+  left: var(--seat-inset);
+}
+
+.game-page .seat-right-col {
+  top: var(--seat-inset);
+  bottom: calc((100cqh - var(--seat-height)) / 2);
+  right: var(--seat-inset);
+}
+
+.game-page .seat-right-col .seat:first-child { margin-bottom: 0; }
+.game-page .seat-self { inset: auto var(--seat-inset) var(--seat-inset) auto; }
+
+.game-page .pve-compact-layout :is(.seat-left-col, .seat-right-col):has(> .seat:only-child) {
+  top: var(--seat-inset);
+  bottom: calc(var(--hand-height) + var(--seat-inset));
+  justify-content: center;
+}
+
+/* The hand shares the main area width with the battlefield, minus the self seat. */
+.game-page .player-zone { right: calc(var(--seat-width) + 34px); }
+
+.game-page .seat-card {
+  box-sizing: border-box;
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 30px 18px 54px;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid #a5bdb6;
+  border-radius: 12px;
+  background: #f3f8f3ed;
+  color: #253f44;
+  text-align: start;
+  box-shadow: 0 5px 18px #17343e2b;
+}
+
+.game-page .seat-card.human { border-color: #478678; }
+.game-page .seat-card.current-turn { border-color: #af8a44; }
+.game-page .seat-card.current-turn::before { display: none; }
+.game-page .seat-card.targetable:hover { transform: none; }
+.game-page .seat-card.dead { opacity: .88; background: #e3e9e6ed; }
+.game-page .seat-card.dead .seat-char-img { filter: none; }
+.game-page .seat-card.dead .seat-char-img img { filter: grayscale(1) brightness(.8); }
+.game-page .seat-card.critical-hp .seat-hp-number { color: #aa3d3d; }
+
+.game-page .seat-char-img {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #d7e8e2;
+  cursor: pointer;
+  color: #254448;
+}
+
+.game-page .seat-char-img img {
+  display: block;
+  object-position: center 31%;
+}
+
+.game-page .seat-char-img img[hidden] { display: none; }
+.game-page .seat-char-img:focus-visible,
+.game-page .seat-summary:focus-visible {
+  outline: 2px solid #126355;
+  outline-offset: -2px;
+}
+
+.seat-art-fallback { font-size: 14px; font-weight: 750; }
+.game-page .seat-role-chip,
+.game-page .seat-state-label {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.game-page .seat-role-chip {
+  left: 4px;
+  background: #213941ec;
+  color: #fbf7e9;
+  border: 1px solid #fff4d790;
+}
+
+.game-page .seat-state-label { right: 4px; }
+
+.game-page .seat-identity {
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
+  padding-inline: 3px;
+  min-width: 0;
+}
+
+.game-page .seat-name {
+  margin: 0;
+  color: #193a42;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.14;
+}
+
+.game-page .seat-owner {
+  overflow: hidden;
+  color: #466361;
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-page .seat-meter {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: center;
+  padding-inline: 3px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.game-page .seat-hp-number { color: #1e6559; }
+.game-page .seat-card-counts { display: flex; align-items: center; gap: 4px; }
+.game-page .seat-attached-count {
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: #f1e4c6;
+  color: #66471a;
+  font-size: 9px;
+}
+.game-page .seat-hand-number { color: #3d5668; }
+.game-page .seat-hp { height: 4px; margin: 0; background: #d6e2d8; }
+.game-page .seat-summary-tray { display: grid; grid-template-rows: minmax(0, 1fr) 18px; gap: 2px; }
+.game-page .seat-equip-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.game-page .seat-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 4px;
+  border: 1px solid #d2e0d9;
+  border-radius: 4px;
+  color: #48635f;
+  background: #e7f0ea;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.1;
+  text-align: start;
+  cursor: pointer;
+}
+
+.game-page .seat-summary.has-items { color: #644d28; background: #f3ead4; border-color: #ddcca5; }
+.game-page .seat-summary:hover { border-color: #669487; }
+.game-page .seat-summary.seat-equip-cell {
+  display: flex;
+  justify-content: center;
+  gap: 1px;
+  padding-inline: 1px;
+  white-space: nowrap;
+}
+.game-page .seat-equip-cell.has-items { font-size: clamp(9px, .85cqw, 10px); }
+.game-page .seat-equip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.game-page .equip-card-rank {
+  flex: none;
+  color: #283c44;
+  font-family: system-ui, sans-serif;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.game-page .equip-card-rank:is([data-suit="Heart"], [data-suit="Diamond"]) { color: #a42a36; }
+.game-page .equip-slot.filled { position: relative; }
+.game-page .equip-slot .equip-card-rank {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: #fff8e9;
+  font-size: 10px;
+  line-height: 1.2;
+}
+.seat-summary-label { font-weight: 800; white-space: nowrap; }
+.seat-summary-value { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.seat-summary-count { font-weight: 800; white-space: nowrap; }
+
+.hero-dossier {
+  box-sizing: border-box;
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(800px, calc(100% - 28px));
+  max-width: none;
+  max-height: min(86dvh, 780px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #a8b9ab;
+  border-radius: 16px;
+  background: #f9f7ef;
+  color: #223e46;
+  box-shadow: 0 22px 72px #1427336b;
+}
+
+.hero-dossier[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.hero-dossier::backdrop { background: #1b333f9c; backdrop-filter: blur(3px); }
+
+.hero-dossier-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid #cddbd2;
+  background: #e4efe9;
+}
+
+.hero-dossier-header h2 { display: flex; align-items: center; gap: 9px; font-size: clamp(21px, 4vw, 29px); line-height: 1.2; }
+.hero-dossier-header p { margin-top: 5px; font-size: 13px; color: #496661; }
+.hero-dossier-god { padding: 3px 6px; border-radius: 4px; color: #654818; background: #f4e6b9; font-size: 11px; }
+.hero-dossier-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #adc8ba;
+  border-radius: 50%;
+  color: #2a5149;
+  background: #f3f8f3;
+  font: 400 23px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.hero-dossier-close:hover { background: #d5e8dc; }
+.hero-dossier-scroll { overflow-y: auto; overscroll-behavior: contain; }
+.hero-dossier-layout { display: grid; grid-template-columns: minmax(160px, 200px) minmax(0, 1fr); gap: 20px; padding: 20px 22px 24px; }
+.hero-dossier-aside { min-width: 0; }
+.hero-dossier-art { display: grid; place-items: center; aspect-ratio: 1; overflow: hidden; background: #dfebe2; border-radius: 10px; }
+.hero-dossier-art img { width: 100%; height: 100%; object-fit: contain; }
+.hero-dossier-player { display: flex; align-items: center; gap: 8px; margin: 12px 0; overflow-wrap: anywhere; }
+.hero-dossier-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+.hero-dossier-player span { display: block; margin-top: 3px; color: #46635e; font-size: 12px; }
+.hero-dossier-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.hero-dossier-metrics div { padding: 7px 9px; border-radius: 6px; background: #e7efe8; }
+.hero-dossier-metrics dt { font-size: 11px; color: #47635d; }
+.hero-dossier-metrics dd { margin: 2px 0 0; font-size: 14px; font-weight: 800; }
+.hero-dossier-record { margin-top: 14px; font-size: 12px; line-height: 1.55; }
+.hero-dossier-record h3,
+.hero-dossier-detail h3 { margin: 0 0 7px; color: #1f534e; font-size: 15px; }
+.hero-dossier-rates { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 5px 0; }
+.hero-dossier-detail { min-width: 0; display: grid; align-content: start; gap: 15px; }
+.hero-dossier-detail section + section { border-top: 1px solid #d7e0d7; padding-top: 12px; }
+.hero-dossier-equipment,
+.hero-dossier-conditions { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.hero-dossier-equipment { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hero-dossier-equipment li,
+.hero-dossier-conditions li { padding: 6px 8px; border: 1px solid #d7dfd4; border-radius: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.hero-dossier-equipment li { display: grid; gap: 2px; background: #f0f4ed; }
+.hero-dossier-equipment li span { color: #4e6b62; }
+.hero-dossier-conditions { display: flex; flex-wrap: wrap; }
+.hero-dossier-conditions li { background: #f6edd9; color: #624e2e; border-color: #ded1ae; }
+.hero-dossier-muted { color: #596d66; font-size: 13px; }
+.hero-dossier-skills { display: grid; gap: 8px; }
+.hero-dossier-skill { padding: 9px 10px; border-radius: 6px; border-left: 2px solid #83a79a; background: #eaf1e9; }
+.hero-dossier-skill h4 { font-size: 13px; margin: 0 0 3px; }
+.hero-dossier-skill p { font-size: 13px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
+
+@media (max-height: 645px) {
+  .game-page { overflow-y: auto; }
+  .game-page #game-main-area { min-height: 645px; }
+}
+
+@media (max-width: 540px) {
+  .hero-dossier-header { padding: 12px 14px; }
+  .hero-dossier-layout { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
+  .hero-dossier-aside { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 6px 10px; }
+  .hero-dossier-art { grid-row: span 2; }
+  .hero-dossier-player { margin: 0; }
+  .hero-dossier-record { grid-column: 1 / -1; margin: 0; }
+}

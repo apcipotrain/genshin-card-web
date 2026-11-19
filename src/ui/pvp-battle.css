@@ -1,0 +1,79 @@
+.pvp-board-connection { display: none; }
+
+.game-page[data-mode="pvp"] .pvp-board-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid #b5cdbf;
+  border-radius: 5px;
+  background: #edf4eb;
+  color: #255d4e;
+  white-space: nowrap;
+}
+
+.pvp-board-connection::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.game-page[data-mode="pvp"] .pvp-board-connection:is([data-state="offline"], [data-state="returned"]) {
+  color: #835a22;
+  border-color: #cbbb93;
+  background: #f8efda;
+}
+
+.game-page[data-mode="pvp"] .pvp-countdown-bar {
+  width: 108px;
+  height: 26px;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #f6eee0;
+  border-color: #c9bd9c;
+}
+
+.game-page[data-mode="pvp"] .pvp-countdown-fill { background: #e8b0a7; border-radius: 0; }
+.game-page[data-mode="pvp"] .pvp-countdown-fill.warning { background: #ecd193; }
+.game-page[data-mode="pvp"] .pvp-countdown-fill.safe { background: #b8d9ca; }
+.game-page[data-mode="pvp"] .pvp-countdown-text { right: 0; left: 0; color: #203e43; font-size: 11px; text-align: center; text-shadow: none; font-variant-numeric: tabular-nums; }
+
+.result-modal.pvp-result {
+  z-index: 1200;
+  padding: 12px;
+  background: #142d3b8f;
+  backdrop-filter: blur(4px);
+}
+
+.pvp-result .modal-box {
+  width: min(1040px, 100%);
+  min-width: 0;
+  max-width: none;
+  max-height: min(720px, calc(100dvh - 24px));
+  padding: clamp(12px, 3vw, 24px);
+  background: #f8f7ee;
+  border: 1px solid #bbcabc;
+  border-radius: 15px;
+  color: #23484d;
+  box-shadow: 0 16px 52px #122b3d59;
+}
+
+.pvp-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 0 14px;
+  text-align: left;
+}
+
+.pvp-result-header h2 { margin: 2px 0 5px; font-size: clamp(22px, 4vw, 32px); line-height: 1.12; }
+.pvp-result-header p { color: #49665f; font-size: 13px; }
+.pvp-result-experience { padding: 7px 10px; border: 1px solid #d3c59f; border-radius: 6px; background: #f1e9d1; color: #6f521e; font-size: 13px; }
+.pvp-result-scroll { max-width: 100%; margin-bottom: 15px; overflow-x: auto; border: 1px solid #cedacf; border-radius: 7px; }
+.pvp-result-scroll:focus-visible { outline: 2px solid #477f6c; outline-offset: 2px; }
+.pvp-result .result-table { margin: 0; white-space: nowrap; --gold: #79591e; --accent-green: #26624f; --accent-red: #913b31; }
+.pvp-result .result-table th, .pvp-result .result-table td { padding: 9px; border-color: #dfe6dc; font-size: 12px; }
+.pvp-result .result-table thead { background: #e7efe7; }
+.pvp-result .result-table th { color: #315a54; }
+.pvp-result .result-table td:first-child { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.pvp-result .result-table .self-row { background: #e8f2e9; }
+.pvp-result .btn-gold { padding-inline: 24px; color: #fff9e9; background: #285b51; border-color: #285b51; }
+.pvp-result .btn-gold:hover { background: #326e60; }

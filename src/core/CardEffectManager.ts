@@ -248,16 +248,18 @@ export class CardEffectManager {
       }
     }
 
-    // 扫描合法目标
-    const validTargets = this.allPlayers.filter(t =>
-      !t.isDead && t !== source &&
-      getWeaponRange(source) >= getDistance(source, t, this.allPlayers)
+    const driver = this.drivers.get(source.id)!;
+    const avoidAllies = driver.isAutomated === true && source.faction !== undefined;
+    const canTarget = (target: PlayerState) =>
+      !target.isDead && target !== source && (!avoidAllies || target.faction !== source.faction);
+    const validTargets = this.allPlayers.filter(target =>
+      canTarget(target) && getWeaponRange(source) >= getDistance(source, target, this.allPlayers)
     );
 
     // 法尔伽-写信：写信目标无视距离加入可选目标
     const varkaLetterId = (this.skillManager as any)?.getVarkaLetterTarget?.(source.id);
     if (varkaLetterId !== null && varkaLetterId !== undefined) {
-      const letterTarget = this.allPlayers.find(p => p.id === varkaLetterId && !p.isDead && p !== source);
+      const letterTarget = this.allPlayers.find(p => p.id === varkaLetterId && canTarget(p));
       if (letterTarget && !validTargets.includes(letterTarget)) {
         validTargets.push(letterTarget);
       }
@@ -289,7 +291,6 @@ export class CardEffectManager {
       // 骑队：武器射程内的目标（贯石斧等武器会增加射程）
       const sourceRange = getWeaponRange(source);
       const distanceTargets = validTargets.filter(t => getDistance(source, t, this.allPlayers) <= sourceRange);
-      const driver = this.drivers.get(source.id)!;
       // 先选主目标
       const primaryId = await driver.promptTarget(source, distanceTargets.map(t => t.id),
         '骑队-选择【杀】的主目标', this.buildContext(source.id));
@@ -325,7 +326,6 @@ export class CardEffectManager {
       selectedTargets = validTargets.slice(0, Math.min(3, validTargets.length));
       this.eventBus.emit(GameEvent.WeaponEffect, { name: '方天画戟', playerId: source.id });
     } else {
-      const driver = this.drivers.get(source.id)!;
       const targetId = await driver.promptTarget(source, validTargets.map(t => t.id), card.name, this.buildContext(source.id));
       if (targetId === null) return false;
       const target = validTargets.find(t => t.id === targetId);
@@ -1150,6 +1150,7 @@ export class CardEffectManager {
           this.eventBus.emit(GameEvent.Log, {
             message: `${chooser.name} 打出了一张【无懈可击】！`
           });
+          VoiceManager.getInstance().playCardVoice(chooser.gender, '无懈可击');
           this.eventBus.emit(GameEvent.CardResponded, {
             playerId: chooser.id, card: nullifyCard, cardName: '无懈可击'
           });

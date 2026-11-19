@@ -1,0 +1,79 @@
+.game-page .game-phase {
+  white-space: nowrap;
+}
+
+.game-page .play-countdown {
+  position: absolute;
+  z-index: 6;
+  inset: 0 12px auto;
+  pointer-events: none;
+}
+
+.play-countdown-track {
+  height: 6px;
+  overflow: hidden;
+  border: 1px solid #d5dfd2;
+  border-radius: 0 0 5px 5px;
+  background: #2c4d5266;
+  box-shadow: 0 1px 6px #183f4826;
+}
+
+.play-countdown-fill {
+  height: 100%;
+  width: 100%;
+  transform-origin: left;
+  background: linear-gradient(90deg, #b14031, #f1a16b);
+  transition: width .1s linear, background-color .2s;
+}
+
+.play-countdown-fill.safe { background: linear-gradient(90deg, #217868, #7ed8b2); }
+.play-countdown-fill.warning { background: linear-gradient(90deg, #b77a24, #f3cc74); }
+
+.play-countdown-text {
+  position: absolute;
+  right: 0;
+  bottom: 10px;
+  padding: 3px 9px;
+  border: 1px solid #d0c298;
+  border-radius: 5px;
+  background: #fff8e9;
+  color: #554829;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  box-shadow: 0 2px 8px #183f4826;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .play-countdown-fill { transition: none; }
+}
+
+.game-page .prompt-bar.is-discard-prompt {
+  align-items: stretch;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.game-page :is(.discard-prompt-hand, .discard-prompt-progress) {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid #b9a672;
+  border-radius: 8px;
+  background: #fdfbf5;
+  box-shadow: 0 3px 14px #17333f26;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.game-page .discard-prompt-progress {
+  border-color: #d3a18b;
+  background: #fff1df;
+  color: #943f31;
+}

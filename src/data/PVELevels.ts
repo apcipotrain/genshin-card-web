@@ -42,12 +42,17 @@ try {
   if (raw) _pveStars = JSON.parse(raw);
 } catch {}
 
-/** 从服务端同步星级数据（优先级最高） */
+/** 从服务端同步星级数据（以最高值为准，不覆盖本地已有的更高星数） */
 export function syncPVEStarsFromServer(stars: Record<number, number>): void {
-  if (stars && Object.keys(stars).length > 0) {
-    _pveStars = stars;
-    try { localStorage.setItem(STARS_LOCAL_KEY, JSON.stringify(_pveStars)); } catch {}
+  if (!stars || Object.keys(stars).length === 0) return;
+  // 合并：服务端有的且星级更高的才覆盖，本地有的保留
+  for (const [key, val] of Object.entries(stars)) {
+    const k = Number(key);
+    const current = _pveStars[k] || 0;
+    if (val > current) _pveStars[k] = val;
   }
+  // localStorage 兜底同步
+  try { localStorage.setItem(STARS_LOCAL_KEY, JSON.stringify(_pveStars)); } catch {}
 }
 
 /** 获取所有关卡星级记录 { levelId: stars } */

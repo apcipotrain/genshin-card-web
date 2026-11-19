@@ -424,11 +424,102 @@
   width: 100%;
 }
 
-.exp-bar-label {
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-bottom: 3px;
-  text-align: right;
+.account-exp-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+  color: #49616b;
+  font-size: 13px;
+}
+
+.account-exp-heading strong {
+  margin-inline-start: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.account-exp-help-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #a9c0d0;
+  border-radius: 50%;
+  background: #eaf2f8;
+  color: #385d72;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.account-exp-help-button:hover,
+.account-exp-help-button[aria-expanded="true"] {
+  background: #385d72;
+  border-color: #385d72;
+  color: #fffdf7;
+}
+
+.account-exp-help-button:focus-visible,
+.account-exp-rules:focus-visible {
+  outline: 2px solid #386e94;
+  outline-offset: 2px;
+}
+
+.account-exp-rules {
+  width: min(352px, calc(100vw - 24px));
+  max-width: 100%;
+  margin: 8px 0 0 auto;
+  padding: 14px 16px;
+  overflow: auto;
+  border: 1px solid #bdcbd0;
+  border-radius: 12px;
+  background: #fffcf4;
+  color: #344e5b;
+  box-shadow: 0 12px 32px rgba(38, 61, 75, .2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.account-exp-rules[popover] {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+}
+
+.account-exp-rules h3 {
+  font-size: 15px;
+  color: #304d5c;
+}
+
+.account-exp-rules p,
+.account-exp-rules table {
+  margin-top: 8px;
+}
+
+.account-exp-rules table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.account-exp-rules :is(th, td) {
+  padding: 4px 5px;
+  border-bottom: 1px solid #dce3df;
+}
+
+.account-exp-rules thead {
+  background: #eaf1f1;
+}
+
+.account-exp-rules :is(th, td):nth-child(-n + 2) {
+  white-space: nowrap;
+}
+
+.account-exp-rules-note {
+  color: #4d6571;
 }
 
 .exp-bar-track {
@@ -445,6 +536,57 @@
   border-radius: 3px;
   transition: width 0.6s ease;
 }
+
+/* ========== 胜率统计区域 ========== */
+.account-stats-section {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stats-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold);
+  margin-bottom: 6px;
+}
+
+.stats-summary {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.stats-roles {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.stats-role {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.role-tag {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+}
+.role-tag.monarch { background: #8b5cf6; }
+.role-tag.minister { background: #3b82f6; }
+.role-tag.rebel { background: #ef4444; }
+.role-tag.traitor { background: #f59e0b; }
 
 /* ========== 占位面板 ========== */
 .panel-placeholder {

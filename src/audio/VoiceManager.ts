@@ -497,7 +497,8 @@ export class VoiceManager {
     const prefix = CARD_VOICE_PREFIX[cardName];
     if (!prefix) return;
 
-    const genderChar = gender === 'Female' ? '女' : '男';
+    // 同时兼容核心枚举（Female/Male）与网络原始值（female/male）。
+    const genderChar = String(gender).toLowerCase() === 'female' ? '女' : '男';
     const path = `${CARD_VOICE_BASE}/${prefix}【${genderChar}】${cardName}.mp3`;
 
     // 不打断当前语音（出牌语音和技能语音可并存）

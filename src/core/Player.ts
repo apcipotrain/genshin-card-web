@@ -6,18 +6,20 @@ import {
   PlayerState, RoleType, GenderType, EquipmentType, Card
 } from './types';
 
-export function createPlayer(id: number, playerName: string, heroId: string, heroName: string, gender: GenderType, maxHp: number): PlayerState {
+export function createPlayer(id: number, playerName: string, heroId: string, heroName: string, gender: GenderType, maxHp: number, region = ''): PlayerState {
   return {
     id,
     playerName,
     heroId,
     name: heroName,
+    region,
     gender,
     role: RoleType.None,
     maxHp,
     hp: maxHp,
     handCards: [],
     equipZone: {
+      [EquipmentType.None]: null,
       [EquipmentType.Weapon]: null,
       [EquipmentType.Armor]: null,
       [EquipmentType.OffensiveHorse]: null,
@@ -64,6 +66,16 @@ export function getRoleChineseName(role: RoleType): string {
     case RoleType.Traitor: return '内奸';
     default: return '未知';
   }
+}
+
+/** AI 用桃支援时，PVE 看阵营，PVP 只认各自的胜利阵营。 */
+export function areRescueTeammates(player: PlayerState, other: PlayerState): boolean {
+  if (player.faction !== undefined || other.faction !== undefined) {
+    return player.faction !== undefined && player.faction === other.faction;
+  }
+  if (player.role === RoleType.Rebel) return other.role === RoleType.Rebel;
+  return (player.role === RoleType.Monarch || player.role === RoleType.Minister) &&
+    (other.role === RoleType.Monarch || other.role === RoleType.Minister);
 }
 
 /** 深拷贝玩家状态 */

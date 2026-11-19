@@ -1,0 +1,386 @@
+/* Travel theme. Loaded after the existing layouts; battle rules and IDs stay shared. */
+:is(.login-page, .home-page, .game-page, .modal-overlay, .game-modal-overlay, .hero-info-popup) {
+  --bg-primary: #edf5fc;
+  --bg-secondary: #fdfbf5;
+  --bg-card: rgba(255, 255, 255, .7);
+  --text-primary: #293e4c;
+  --text-secondary: #526875;
+  --text-dim: #657781;
+  --gold: #896629;
+  --gold-dim: #96783f;
+  --border-subtle: rgba(72, 101, 111, .18);
+  --accent-blue: #287390;
+  --accent-green: #277768;
+  --accent-red: #b64343;
+  --accent-orange: #a2651d;
+  --paper: #fdfbf5;
+  --paper-glass: rgba(252, 250, 243, .95);
+  --travel-shadow: 0 12px 36px rgba(26, 58, 68, .14);
+  color: var(--text-primary);
+  color-scheme: light;
+}
+
+.ui-icon { width: 24px; height: 24px; display: inline-block; flex-shrink: 0; vertical-align: middle; }
+.travel-eyebrow { color: var(--gold); font-size: 12px; letter-spacing: 3px; line-height: 1.8; font-weight: 600; }
+:is(.login-page, .home-page, .game-page) button { font-family: inherit; }
+:is(.login-page, .home-page, .game-page) :focus-visible {
+  outline: 3px solid #227c94;
+  outline-offset: 4px;
+}
+:is(.login-page, .home-page, .game-page, .modal-overlay, .game-modal-overlay) .btn {
+  border-radius: 24px;
+  min-height: 38px;
+}
+:is(.login-page, .home-page, .game-page, .modal-overlay, .game-modal-overlay) .btn-gold {
+  background: #344e5c;
+  border-color: #344e5c;
+  color: #fff9e8;
+  box-shadow: inset 0 0 0 3px #344e5c, inset 0 0 0 4px rgba(237, 214, 161, .6);
+}
+:is(.login-page, .home-page, .game-page, .modal-overlay, .game-modal-overlay) .btn-gold:hover {
+  background: #426879;
+  border-color: #426879;
+  box-shadow: 0 5px 18px rgba(35, 72, 84, .2);
+}
+:is(.home-page, .game-page, .modal-overlay, .game-modal-overlay) .btn-ghost {
+  background: rgba(255, 255, 255, .65);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+:is(.home-page, .game-page) .btn-ghost:hover { background: #fffdf6; border-color: #b19a66; }
+
+/* A landscape stays visible between the paper-like navigation and controls. */
+.home-page {
+  background: linear-gradient(90deg, rgba(237, 246, 255, .82), rgba(238, 245, 255, .25) 52%, rgba(230, 243, 255, .04)), url('../../Resources/Backgrounds/大厅界面.jpg') center / cover;
+}
+.home-sidebar {
+  width: 112px;
+  padding: 26px 10px 22px;
+  background: rgba(252, 250, 243, .9);
+  backdrop-filter: blur(16px);
+  border-right: 1px solid rgba(255,255,255,.8);
+  box-shadow: 6px 0 32px rgba(38,74,78,.06);
+  gap: 12px;
+}
+.sidebar-brand { color: var(--gold); margin: 4px 0 28px; }
+.sidebar-brand .ui-icon { width: 38px; height: 38px; }
+.sidebar-item { background: transparent; color: #526772; width: 88px; padding: 12px 4px; border-radius: 10px; }
+.sidebar-item .ui-icon { width: 25px; height: 25px; }
+.sidebar-item:hover, .sidebar-item.active { color: #315c6a; background: #e5effa; border-color: #c8d9e8; }
+.sidebar-label { font-size: 12px; line-height: 1.6; letter-spacing: .5px; }
+.sidebar-divider { background: #d0d9d3; }
+.home-main { position: relative; align-items: flex-start; padding: clamp(35px, 8vh, 88px) clamp(28px, 6vw, 100px) 28px; }
+.home-header { text-align: left; margin: 0 0 30px; }
+.home-title {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  filter: none;
+  color: #2d4958;
+  font-family: 'STZhongsong', 'Songti SC', 'SimSun', serif;
+  font-size: clamp(48px, 6vw, 76px);
+  letter-spacing: 12px;
+  font-weight: 600;
+  margin: 10px 0 16px;
+  text-shadow: 0 2px 12px rgba(255,255,255,.65);
+}
+.home-subtitle { font-size: 16px; letter-spacing: 2px; color: #3e606d; }
+.home-status { display: inline-flex; align-items: center; gap: 8px; margin-top: 24px; padding: 8px 16px; background: rgba(255,253,246,.85); border: 1px solid rgba(137,158,151,.35); border-radius: 24px; color: #405d68; font-size: 14px; }
+.home-status:empty { display: none; }
+.home-status::before { content: ''; width: 6px; height: 6px; background: #4a8fbf; border-radius: 50%; }
+.home-modes { width: min(100%, 730px); gap: 22px; margin-top: 0; }
+.mode-card, .mode-card.pve, .mode-card.pvp {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: 268px;
+  padding: 26px 28px 22px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  border: 1px solid rgba(181, 164, 123, .6);
+  border-radius: 6px 28px 6px 6px;
+  box-shadow: var(--travel-shadow), inset 0 0 0 5px rgba(255,255,255,.65);
+  color: var(--text-primary);
+  text-align: left;
+}
+.mode-card.pve {
+  background-image: linear-gradient(180deg, rgba(18, 47, 56, .18), rgba(12, 37, 48, .8)), var(--pve-mode-background);
+  background-position: center;
+  background-size: cover;
+}
+.mode-card.pvp {
+  background-image: linear-gradient(180deg, rgba(21, 36, 58, .14), rgba(25, 31, 55, .82)), var(--pvp-mode-background);
+  background-position: center;
+  background-size: cover;
+}
+.mode-card:hover, .mode-card.pve:hover, .mode-card.pvp:hover { border-color: #e4cc8a; box-shadow: 0 20px 44px rgba(25,49,64,.34); transform: translateY(-5px); filter: brightness(1.06) saturate(1.08); }
+.mode-kicker { font-size: 12px; letter-spacing: 2px; color: var(--text-dim); }
+.mode-icon { position: absolute; right: 26px; top: 25px; margin: 0; color: #638eaf; filter: none; }
+.mode-icon .ui-icon { width: 38px; height: 38px; }
+.pvp .mode-icon { color: #588194; }
+.mode-name, .pve .mode-name, .pvp .mode-name { color: #2d4958; font: 600 30px 'STZhongsong', 'Songti SC', 'SimSun', serif; letter-spacing: 3px; margin: 35px 0 12px; }
+.mode-desc { font-size: 14px; padding: 0; text-align: left; line-height: 1.8; }
+.mode-link { display: flex; align-items: center; justify-content: space-between; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 16px; margin-top: auto; color: #406b76; font-size: 14px; font-weight: 600; }
+.mode-link .ui-icon { width: 19px; height: 19px; }
+.mode-card:is(.pve, .pvp) :is(.mode-kicker, .mode-name, .mode-desc, .mode-link) { color: #f8fbf7; text-shadow: 0 2px 8px rgba(4,20,31,.72); }
+.mode-card:is(.pve, .pvp) .mode-link { border-top-color: rgba(255,255,255,.34); }
+.mode-card:is(.pve, .pvp) .mode-icon { color: #fff3ca; filter: drop-shadow(0 2px 6px rgba(5,20,31,.55)); }
+.home-location { margin-top: auto; padding-top: 30px; font-size: 13px; letter-spacing: 2px; color: #3b6064; }
+.home-location .ui-icon, .login-location .ui-icon { width: 17px; height: 17px; margin-right: 6px; }
+.home-footer { margin-top: 12px; color: #4b6870; font-size: 12px; letter-spacing: .6px; }
+
+/* Account and related dialogs use the same travel notebook surface. */
+.home-overlay.active { background: rgba(30,59,65,.38); backdrop-filter: blur(7px); }
+.panel-modal { background: var(--paper); border: 1px solid #c5b58d; box-shadow: 0 22px 90px rgba(30,61,70,.3); max-height: 90dvh; display: flex; flex-direction: column; border-radius: 12px; }
+.panel-modal-header { background: #f2f3f5; border-bottom: 1px solid #d8d5bf; padding: 21px 28px; flex-shrink: 0; }
+.panel-modal-header h2 { color: #344f5a; font-family: 'STZhongsong', 'Songti SC', 'SimSun', serif; font-size: 23px; }
+.panel-modal-header .travel-eyebrow { font-size: 11px; margin-bottom: 5px; }
+.panel-close-btn { background: #e4eaf3; color: #425c65; width: 34px; height: 34px; flex-shrink: 0; }
+.panel-modal-body { overflow-y: auto; min-height: 0; padding: 28px; }
+.account-modal { width: 720px; }
+.account-layout { gap: 32px; align-items: stretch; }
+.account-avatar-section { width: 170px; display: flex; align-items: center; flex-direction: column; padding: 16px 12px; border: 1px solid #cbd8ca; background: linear-gradient(160deg, #dfedf9, #f5f3e7); border-radius: 80px 80px 8px 8px; }
+.account-emblem { margin: 4px 0 24px; color: #8f7d49; }
+.account-emblem .ui-icon { width: 32px; height: 32px; }
+.avatar-wrapper { width: 104px; height: 104px; border: 1px solid #b4c4b9; border-radius: 50%; padding: 0; background: rgba(255,255,255,.65); }
+.avatar-placeholder { flex-direction: column; gap: 8px; font-size: 12px; }
+.avatar-placeholder .ui-icon { width: 32px; height: 32px; color: #627d73; }
+.account-level-badge { color: #456458; margin-top: 20px; font-size: 26px; }
+.account-traveler-label { font-size: 12px; letter-spacing: 2px; color: #637f73; margin-top: 6px; }
+.account-info-section { min-width: 0; gap: 16px; }
+.field-label { font-size: 14px; }
+.field-value, .field-input { background: #eff5fa; border: 1px solid #cbd9e5; border-radius: 6px; min-width: 0; padding: 9px 11px; color: #344e5b; }
+.field-value { background: transparent; border-color: transparent; }
+.account-field-hint { padding-left: 0; margin-top: 0; font-size: 12px; line-height: 1.6; }
+.account-info-section .btn { align-self: flex-start; padding-inline: 32px; }
+.exp-bar-track { background: #dce8f4; height: 8px; }
+.exp-bar-fill { background: linear-gradient(90deg, #71a8d3, #cbd8ee); }
+.exp-bar-label { color: var(--text-secondary); font-size: 13px; margin-bottom: 8px; }
+.account-stats-section { padding: 16px 0; border-top: 1px solid #d4dfea; }
+.stats-title { color: #466371; font-size: 14px; }
+.stats-summary { font-size: 13px; line-height: 1.8; gap: 14px; }
+.stats-role { background: #eef4fa; border: 1px solid #d4dfea; padding: 9px 5px; }
+.profile-msg { margin-left: 0; }
+.home-settings-row { font-size: 14px; }
+.home-settings-select, .settings-select, .home-settings-select option { background: #edf4fb; color: #344e5b; border-color: #bccdc5; }
+.hero-detail-modal, .compendium-modal { background: var(--paper); color: var(--text-primary); }
+.compendium-card, .hero-detail-skill { background: #edf4fb; }
+.home-page ::-webkit-scrollbar-thumb { background: #b8c9c0; }
+
+/* Login: scenery on the left and a compact paper panel on the right. */
+.login-bg { background: linear-gradient(90deg, rgba(228,240,255,.02) 25%, rgba(223,238,255,.2) 60%, rgba(234,244,255,.55)), url('../../Resources/Backgrounds/大厅界面.jpg') center / cover; justify-content: flex-end; padding: 40px clamp(32px, 9vw, 160px); overflow-y: auto; }
+.login-landscape-title { position: absolute; left: 9%; top: 15%; color: #fffaf0; text-shadow: 0 2px 12px rgba(25,55,91,.65); }
+.login-landscape-title .travel-eyebrow { color: #fff0c8; }
+.login-landscape-title h1 { font: 600 clamp(42px, 6vw, 76px) 'STZhongsong', 'Songti SC', 'SimSun', serif; letter-spacing: 12px; margin: 10px 0 18px; }
+.login-landscape-title p { font-size: 17px; letter-spacing: 3px; }
+.login-card { position: relative; width: 390px; max-width: 100%; padding: 38px; background: rgba(252,250,243,.96); border: 1px solid #c8bb92; border-radius: 8px 38px 8px 8px; box-shadow: 0 20px 80px rgba(38,70,75,.2), inset 0 0 0 6px rgba(255,255,255,.6); }
+.login-emblem { text-align: center; color: #a18a4f; margin-bottom: 20px; }
+.login-emblem .ui-icon { width: 38px; height: 38px; }
+.login-title { color: #344f5b; font: 600 28px 'STZhongsong', 'Songti SC', 'SimSun', serif; letter-spacing: 2px; text-shadow: none; }
+.login-subtitle { color: #657979; font-size: 13px; letter-spacing: 0; line-height: 1.8; margin: 10px 0 30px; }
+.login-form label { font-size: 14px; color: #526875; margin-bottom: 8px; }
+.login-form .form-input { background: #eff5fa; border: 1px solid #c6d6e6; color: #293e4c; border-radius: 6px; font: inherit; font-size: 15px; }
+.login-form .form-input::placeholder { color: #71837f; }
+.login-form .form-input:focus { border-color: #6397c4; box-shadow: 0 0 0 3px rgba(74,130,112,.1); }
+.login-error { color: #aa3737; font-size: 13px; line-height: 1.6; }
+.login-switch { color: #657979; font-size: 14px; margin-top: 22px; }
+.login-switch a { color: #35778b; font-weight: 600; }
+.login-location { position: absolute; bottom: 30px; left: 9%; color: #fcfff2; font-size: 13px; letter-spacing: 2px; text-shadow: 0 1px 6px #35564f; }
+
+/* PVP pages share one random pvp1-10 landscape and a compact navy glass HUD. */
+:is(.match-page, .waiting-page) {
+  --text-primary: #eef7fb;
+  --text-secondary: #bed0da;
+  --text-dim: #91a8b5;
+  --gold: #f1d491;
+  --gold-dim: #c9a961;
+  --border-subtle: rgba(210, 231, 239, .22);
+  background-image: linear-gradient(135deg, rgba(8, 20, 35, .42), rgba(10, 24, 42, .68)), var(--pvp-background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.match-page > :first-child, .waiting-header { background: rgba(8, 23, 39, .5); backdrop-filter: blur(10px); }
+.room-list-panel, .create-card { background: rgba(8, 24, 42, .62); border-color: rgba(214, 232, 239, .24); backdrop-filter: blur(14px); box-shadow: 0 16px 42px rgba(3, 13, 25, .24); }
+.room-list-header { background: rgba(219, 237, 243, .06); }
+.room-item { background: rgba(221, 239, 245, .08); border-color: rgba(214, 232, 239, .08); }
+.room-item:hover { background: rgba(226, 241, 246, .16); border-color: rgba(241, 212, 145, .52); }
+.match-page .form-input { background: rgba(4, 17, 30, .58); border-color: rgba(210, 231, 239, .25); color: #f3f8fa; }
+.waiting-container { padding: 22px; border-radius: 18px; background: rgba(8, 24, 42, .42); backdrop-filter: blur(10px); box-shadow: 0 18px 50px rgba(3, 13, 25, .2); }
+.player-slot { background: rgba(218, 237, 243, .08); border-color: rgba(211, 231, 239, .2); }
+.player-slot.empty { background: rgba(218, 237, 243, .04); }
+
+/* Battle: the image stays opaque; only HUD surfaces use translucent glass. */
+.game-page {
+  background: #dfedf8;
+  --battle-glass-soft: rgba(242, 249, 252, .22);
+  --battle-glass: rgba(248, 251, 247, .32);
+  --battle-glass-strong: rgba(250, 251, 246, .44);
+  --battle-glass-line: rgba(234, 244, 246, .58);
+}
+.game-page > .game-bg { opacity: 1; filter: none; }
+.game-page .btn-ghost { background: rgba(248, 252, 252, .34); }
+.game-page .btn-ghost:hover { background: rgba(255, 253, 246, .58); }
+.game-page .hand-main-area { margin-right: 12px; }
+.game-page .action-bar { left: 40%; }
+.game-page .prompt-bar { left: 40%; max-width: 37%; white-space: normal; font-size: 13px; padding: 8px 14px; text-align: center; }
+.game-top-bar { background: var(--battle-glass-strong); backdrop-filter: blur(3px) saturate(1.08); border: 1px solid var(--battle-glass-line); border-radius: 8px; padding: 10px 14px; box-shadow: 0 3px 15px rgba(46,68,67,.07); gap: 12px; }
+.game-top-left { flex-shrink: 0; }
+.game-phase { color: #376d6d; background: #e6eff9; padding: 7px 12px; border-radius: 20px; line-height: 1.4; text-align: center; }
+.game-top-right { gap: 12px; font-size: 12px; }
+.deck-remaining { font-size: 12px; }
+.deck-remaining .count { color: #486877; font-size: 18px; font-variant-numeric: tabular-nums; }
+.game-sidebar { flex-basis: 300px; background: rgba(248, 250, 246, .96); backdrop-filter: blur(14px); border-left: 1px solid var(--battle-glass-line); padding: 8px; box-shadow: -6px 0 30px rgba(31,65,66,.12); }
+.log-panel, .chat-panel { padding: 18px 14px; }
+.game-page .chat-panel { display: flex; flex-direction: column; flex: 0 0 45%; min-height: 270px; border-bottom: 0; overflow: hidden; }
+.log-panel h4, .chat-panel h4 { font-size: 15px; color: #476577; margin-bottom: 14px; letter-spacing: 1px; }
+.sidebar-caption { display: block; color: #7c8269; font-size: 10px; letter-spacing: 2px; margin-top: 5px; font-weight: 400; }
+.log-content { font-size: 12px; line-height: 1.85; }
+.log-content > div { color: #304954; border-bottom: 1px solid rgba(94,122,113,.15); padding: 5px 0; }
+.chat-placeholder { font-size: 12px; line-height: 1.7; text-align: left; }
+.game-page .log-panel { flex: 1 1 55%; min-height: 100px; overflow: hidden; }
+.game-page .game-sidebar { overflow: hidden; color: #304954; }
+.chat-panel h4 { flex-shrink: 0; }
+.chat-messages { flex: 1 1 auto; min-height: 65px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.chat-message { margin: 0 0 9px; padding: 8px 10px; border: 1px solid #dce4df; border-radius: 8px 8px 8px 2px; background: #fffef9; }
+.chat-message.own { background: #e7f1ed; border-color: #c8dbd2; border-radius: 8px 8px 2px 8px; }
+.chat-meta { display: flex; align-items: baseline; gap: 6px; justify-content: space-between; font-size: 11px; color: #456961; }
+.chat-meta strong { overflow-wrap: anywhere; }
+.chat-meta time { flex-shrink: 0; color: #65756e; font-size: 10px; }
+.chat-message p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 13px; color: #243c43; }
+.chat-empty { color: #596e68; font-size: 12px; line-height: 1.8; }
+.chat-quick { display: flex; flex-wrap: wrap; gap: 4px; margin: 7px 0; flex-shrink: 0; }
+.chat-panel button { cursor: pointer; color: #365a53; background: #edf3eb; border: 1px solid #bacdc0; border-radius: 5px; padding: 4px 7px; font: inherit; font-size: 11px; }
+.chat-panel button:hover { background: #dceade; }
+.chat-panel button:disabled { opacity: .55; cursor: default; }
+.chat-panel .chat-unread { background: #f6e7ba; margin-top: 4px; }
+.chat-panel [hidden] { display: none; }
+.chat-form { flex-shrink: 0; }
+.chat-form textarea { display: block; box-sizing: border-box; width: 100%; resize: none; background: #fffef9; color: #243c43; border: 1px solid #aebfb7; border-radius: 7px; padding: 8px; font: inherit; font-size: 12px; line-height: 1.5; }
+.chat-form textarea:focus-visible, .chat-panel button:focus-visible { outline: 2px solid #418576; outline-offset: 2px; }
+.chat-compose-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
+.chat-compose-footer button { background: #416e63; color: #fffdf2; padding: 5px 15px; }
+.chat-count, .chat-status { color: #56695f; font-size: 10px; }
+.chat-status { margin-top: 5px; min-height: 15px; line-height: 1.5; }
+.pending span { color: #856129; font-size: 11px; }
+.pending button { margin-left: 4px; }
+@media (max-height: 700px) { .game-page .chat-panel { min-height: 230px; flex-basis: 53%; padding-top: 8px; padding-bottom: 8px; } .chat-quick { display: none; } }
+.game-page .seat-card { background: var(--battle-glass-strong); backdrop-filter: blur(2px) saturate(1.06); color: #293e4c; border-color: rgba(165, 183, 169, .68); box-shadow: 0 5px 18px rgba(25,61,68,.16); border-radius: 8px; }
+.game-page .seat-char-img { background: rgba(219, 232, 246, .28); border-color: rgba(192, 201, 179, .62); }
+.seat-name { font-size: 14px; }
+.seat-role { font-size: 12px; }
+.seat-hp { background: #d3ddd1; }
+.seat-hp-text, .seat-hand-count { font-size: 12px; }
+.seat-card.current-turn { border-color: #ad883d; box-shadow: 0 0 0 3px rgba(252,239,181,.9), 0 6px 24px rgba(101,81,39,.24); }
+.seat-card.targetable { border-color: #b77b28; }
+.seat-card.targetable:hover { box-shadow: 0 0 0 3px #e9c677, 0 6px 24px rgba(101,81,39,.24); }
+.game-page .seat-info-panel { background: rgba(226, 238, 247, .34); border-color: rgba(193, 207, 203, .55); }
+.seat-info-value, .seat-info-row, .seat-info-label { font-size: 11px; }
+.seat-equip-row .seat-info-value, .seat-status-row .seat-info-value { font-size: 11px; color: #746231; }
+.seat-status-marks { background: transparent; }
+.status-mark { background: #344c59; font-size: 11px; }
+.game-page .player-zone { right: calc(168px + 4%); background: var(--battle-glass-soft); backdrop-filter: blur(3px) saturate(1.06); border-top: 1px solid var(--battle-glass-line); border-right: 1px solid var(--battle-glass-line); border-top-right-radius: 16px; box-shadow: 0 -8px 30px rgba(36,70,72,.05); }
+.game-page .equip-slot { background: rgba(225, 237, 247, .32); border-color: rgba(151, 176, 171, .58); color: #4a675f; font-size: 12px; }
+.game-page .equip-slot.filled { background: rgba(247, 243, 223, .4); }
+.game-page .skill-area { border-left-color: rgba(198, 210, 191, .54); }
+.game-page .skill-btn { background: rgba(227, 238, 247, .38); border-color: rgba(178, 198, 186, .58); color: #4c665d; font-size: 13px; }
+.game-page .skill-btn.active { background: rgba(243, 234, 208, .56); border-color: #b8964f; color: #6d4d13; }
+.game-page .skill-btn.active:hover { background: rgba(238, 224, 184, .68); border-color: #98752c; }
+.game-card { background: #faf7ed; }
+.game-card.playable { border-color: #b0934a; }
+.game-card.selected { border-color: #986b16; box-shadow: 0 0 0 3px #e9c969, 0 6px 20px rgba(78,78,42,.25); }
+.game-card .card-type-badge { color: #fff3c6; }
+.btn-play-confirm, .btn-response-confirm { background: #426c72; border-color: #345d62; color: #fffdf1; box-shadow: none; }
+.btn-play-confirm:hover, .btn-response-confirm:hover { background: #527f81; }
+.btn-play-end, .btn-response-pass { background: #f3ede1; border: 1px solid #bead94; color: #826048; }
+.btn-play-end:hover, .btn-response-pass:hover { background: #eadfce; }
+.game-page .prompt-bar, .response-btn-bar, .grace-nullify-section { background: #fdfbf5; border-color: #b9a672; color: #705420; box-shadow: var(--travel-shadow); }
+.game-modal-overlay, .modal-overlay, .game-page .settings-overlay { background: rgba(27,56,63,.48); backdrop-filter: blur(5px); }
+.game-modal, .modal-overlay .modal-box, .game-page .settings-modal, .hero-info-popup { background: #fdfbf5; border-color: #baa977; color: #344e5b; box-shadow: 0 22px 70px rgba(25,52,62,.26); }
+.game-modal h3, .game-page .settings-modal h3, .hero-info-detail h2 { color: #49616a; }
+.modal-btn { background: #edf0e6; border-color: #cad2bc; color: #415b65; }
+.modal-btn:hover { background: #f1e8cd; }
+.settings-select, .settings-select option { background: #eef4fa; color: #344e5b; }
+.game-page .hero-select-overlay {
+  position: fixed;
+  z-index: 90;
+  padding: clamp(12px, 2.5vw, 28px);
+  background-image: linear-gradient(120deg, #e1eef7b8, #d5e7f175), var(--game-cover-image);
+  background-position: center;
+  background-size: cover;
+}
+.game-page:has(> .hero-select-overlay:not([hidden])) {
+  overflow: hidden;
+}
+.game-page:has(> .hero-select-overlay:not([hidden])) > :is(#game-main-area, .game-sidebar) {
+  visibility: hidden;
+}
+.hero-select-panel {
+  background: #f6f8eff2;
+  border: 1px solid #a9beb3;
+  border-radius: 16px;
+  box-shadow: 0 14px 44px #28474c33;
+}
+.hero-select-panel h2 { color: #3b5a65; font: 600 clamp(20px, 4vw, 30px)/1.25 'STZhongsong', 'Songti SC', 'SimSun', serif; letter-spacing: 2px; overflow-wrap: anywhere; }
+.hero-select-subtitle, .hero-card-title, .hero-select-hint { color: #657d72; }
+.hero-cards-row { flex-wrap: wrap; gap: 22px; }
+.hero-card { background: #faf8ed; border: 1px solid #babe9f; box-shadow: 0 8px 24px rgba(50,82,76,.11); border-radius: 8px 24px 8px 8px; }
+.hero-select-panel .hero-cards-row { gap: clamp(8px, 2vw, 22px); }
+.hero-select-panel .hero-card { width: clamp(110px, 24vw, 160px); padding: clamp(6px, 2vw, 12px); }
+.hero-select-panel .hero-card-img { width: min(96px, 100%); height: auto; aspect-ratio: 1; }
+.hero-select-panel .hero-select-hint { margin-top: 16px; animation: none; }
+.hero-card:hover { background: #fffbee; border-color: #aa8a41; box-shadow: 0 10px 30px rgba(69,96,79,.2); }
+.hero-card-title { font-size: 12px; }
+.hero-card-region { color: #657970; }
+.hero-info-img { background: #e7eef8; }
+.hero-info-tag, .hero-info-skill, .hero-info-equip { background: #edf3fb; }
+.hero-info-subtitle, .hero-info-skills-title { color: #6c794f; }
+.hero-info-skill { font-size: 14px; line-height: 1.8; }
+.game-page .game-bg-cross { pointer-events: none; }
+.game-page ::-webkit-scrollbar-thumb { background: #b4c7ba; }
+
+/* Desktop battle keeps all seats reachable; narrow screens can scroll the table. */
+@media (max-width: 1100px) {
+  .home-main { padding: 42px 32px 24px; }
+  .home-modes { gap: 16px; }
+  .mode-card, .mode-card.pve, .mode-card.pvp { padding: 24px; }
+  .game-sidebar { flex-basis: 210px; }
+  .game-top-bar { flex-wrap: wrap; }
+  .game-top-right { margin-left: auto; }
+  .login-bg { padding-right: 5%; }
+  .login-landscape-title { left: 5%; }
+}
+@media (max-width: 760px) {
+  .home-sidebar { width: 76px; padding: 18px 4px; gap: 8px; }
+  .sidebar-brand { margin-bottom: 16px; }
+  .sidebar-item { width: 66px; padding: 10px 2px; }
+  .sidebar-label { font-size: 11px; }
+  .home-main { padding: 30px 20px 24px; }
+  .home-header { margin-bottom: 24px; }
+  .home-title { font-size: 44px; letter-spacing: 7px; }
+  .home-subtitle { font-size: 14px; letter-spacing: .5px; }
+  .travel-eyebrow { font-size: 10px; letter-spacing: 1.5px; }
+  .home-modes { flex-direction: column; gap: 16px; }
+  .mode-card, .mode-card.pve, .mode-card.pvp { flex: none; width: 100%; height: 216px; padding: 20px; }
+  .mode-name, .pve .mode-name, .pvp .mode-name { margin-top: 20px; font-size: 25px; }
+  .mode-icon .ui-icon { width: 28px; height: 28px; }
+  .mode-desc { font-size: 13px; }
+  .home-location { padding-top: 26px; }
+  .home-footer { line-height: 1.8; }
+  .login-bg { padding: 28px 22px; justify-content: center; }
+  .login-landscape-title, .login-location { display: none; }
+  .login-card { padding: 30px; }
+  .account-layout { flex-direction: column; gap: 24px; }
+  .account-avatar-section { width: 100%; padding: 16px; border-radius: 8px; flex-direction: row; gap: 14px; flex-wrap: wrap; }
+  .account-emblem { display: none; }
+  .avatar-wrapper { width: 68px; height: 68px; }
+  .avatar-placeholder { gap: 3px; font-size: 10px; }
+  .avatar-placeholder .ui-icon { width: 22px; height: 22px; }
+  .account-level-badge { margin: 0; font-size: 24px; }
+  .account-traveler-label { margin: 0; }
+  .panel-modal-header, .panel-modal-body { padding: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.home-page, .login-page, .game-page) *,
+  :is(.home-page, .login-page, .game-page) *::before,
+  :is(.home-page, .login-page, .game-page) *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

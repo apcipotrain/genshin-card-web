@@ -10,10 +10,10 @@ import { DeckManager } from '../DeckManager';
 import { EventBus } from '../EventBus';
 import { getAlivePlayers } from '../DistanceCalc';
 import { isSlash, getCardDetail, getCardColor } from '../Card';
-import { getHandLimit, getRoleChineseName } from '../Player';
+import { areRescueTeammates, getHandLimit, getRoleChineseName } from '../Player';
 import { DamageSystem } from '../DamageSystem';
 import { getDistance } from '../DistanceCalc';
-import { SuitType, ColorType, ElementType } from '../types';
+import { CARD_SUITS, SuitType, ColorType, ElementType, type CardSuit } from '../types';
 import { VoiceManager } from '../../audio/VoiceManager';
 
 export interface SkillInfo {
@@ -65,6 +65,18 @@ export class SkillManager {
       this.playerSkillData.set(playerId, {});
     }
     return this.playerSkillData.get(playerId);
+  }
+
+  /** 武将牌上的实体牌只公开张数。 */
+  getAttachedCardCount(player: PlayerState): number {
+    const data = this.playerSkillData.get(player.id);
+    if (!data || player.isDead) return 0;
+    return (data.mapleLeaves?.length ?? 0)
+      + (data.knowledgeCards?.length ?? 0)
+      + (data.springCard ? 1 : 0)
+      + (data.kayeaMarkers?.length ?? 0)
+      + (data.dilucMarkers?.length ?? 0)
+      + (data.varkaLetters?.length ?? 0);
   }
 
   // ======================== 获取玩家技能列表 ========================
@@ -173,6 +185,16 @@ export class SkillManager {
   /** 回合开始时 */
   async onTurnStart(player: PlayerState, ctx: GameContextSnapshot): Promise<void> {
     this.currentTurnPlayerId = player.id;
+    const data = this.playerSkillData.get(player.id);
+    if (data) delete data.varkaLetterTarget;
+    const letters: Card[] | undefined = data?.varkaLetters;
+    if (letters?.length) {
+      data.varkaLetters = [];
+      player.handCards.push(...letters);
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【写信】${player.name} 获得武将牌上的 ${letters.length} 张牌。`
+      });
+    }
     switch (player.heroId) {
       case 'zhongli': await this.zhongliContract(player, ctx); break;
       case 'nilou': await this.nilouFlowerDance(player); break;
@@ -283,6 +305,12 @@ export class SkillManager {
   /** 角色死亡时（胡桃-往生拿装备, 夜兰-幽客检查, 克洛琳德-剧团清除） */
   onPlayerDeath(deadPlayer: PlayerState): void {
     this.onHutaoRebirthEquip(deadPlayer);
+    const data = this.playerSkillData.get(deadPlayer.id);
+    const letters: Card[] | undefined = data?.varkaLetters;
+    if (letters?.length) {
+      data.varkaLetters = [];
+      for (const card of letters) this.deck.sendToDiscard(card);
+    }
     // 克洛琳德-剧团：阵亡时解除禁技
     if (deadPlayer.heroId === 'clorinde' && this._clorindeTroupeActive) {
       this._clorindeTroupeActive = false;
@@ -291,7 +319,7 @@ export class SkillManager {
   }
 
   /** 判定牌生效后（芙宁娜-正义, 那维莱特-龙权, 莱欧斯利-狱长） */
-  onAfterJudge(player: PlayerState, judgeCard: Card, kitName?: string, effectTriggered?: boolean): void {
+  async onAfterJudge(player: PlayerState, judgeCard: Card, kitName?: string, effectTriggered?: boolean): Promise<void> {
     if (player.heroId === 'furina') {
       this.furinaJustice(player, judgeCard);
     }
@@ -299,7 +327,7 @@ export class SkillManager {
     this.neuvilletteDragonAuthority(judgeCard, kitName || '', effectTriggered ?? false);
     // 莱欧斯利-狱长（只对乐不思蜀生效，但跳过赤鬼假乐不思蜀）
     if (kitName === '乐不思蜀' && !(kitName && (player as any)._ittouRedOniKit)) {
-      this.wriothesleyWarden(player, effectTriggered ?? false);
+      await this.wriothesleyWarden(player, effectTriggered ?? false);
     }
     // 茜特菈莉-萨满：检查预言结果
     this.checkCitlaliShamanResult(judgeCard.suit);
@@ -1000,7 +1028,7 @@ export class SkillManager {
       totalJudge: 1,
     });
     // 那维莱特-龙权：歌颂判定后摸牌
-    this.onAfterJudge(player, judgeCard, '歌颂', isBlack);
+    await this.onAfterJudge(player, judgeCard, '歌颂', isBlack);
 
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【歌颂】，判定牌：${getCardDetail(judgeCard)}`
@@ -1043,7 +1071,7 @@ export class SkillManager {
       totalJudge: 1,
     });
     // 那维莱特-龙权：罪舞判定后摸牌
-    this.onAfterJudge(player, judgeCard, '罪舞', isRed);
+    await this.onAfterJudge(player, judgeCard, '罪舞', isRed);
 
     this.eventBus.emit(GameEvent.Log, {
       message: `${player.name} 发动【罪舞】！判定牌：${getCardDetail(judgeCard)}`
@@ -1394,7 +1422,7 @@ export class SkillManager {
     data.mapleLeaves.push(selected);
 
     this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【红枫】，将 ${getCardDetail(selected)} 扣置为"枫"。（共${data.mapleLeaves.length}张）`
+      message: `${player.name} 发动【红枫】，将一张牌扣置为“枫”（共 ${data.mapleLeaves.length} 张）。`
     });
     VoiceManager.getInstance().playSkillVoice('kazuha', '红枫', player.id);
     this._kazuhaShowEffects(data.mapleLeaves);
@@ -2320,7 +2348,7 @@ export class SkillManager {
   }
 
   /** 莱欧斯利-狱长：乐不思蜀联动 */
-  private wriothesleyWarden(judgeTarget: PlayerState, effectTriggered: boolean): void {
+  private async wriothesleyWarden(judgeTarget: PlayerState, effectTriggered: boolean): Promise<void> {
     const wrio = this.allPlayers.find(p => !p.isDead && p.heroId === 'wriothesley');
     if (!wrio) return;
     const data = this.getData(wrio.id);
@@ -2332,7 +2360,7 @@ export class SkillManager {
       });
       VoiceManager.getInstance().playSkillVoice('wriothesley', '狱长', wrio.id);
       // 使用damageSystem直接调用
-      this.damageSystem.applyHpChange(judgeTarget, -1, null, wrio);
+      await this.damageSystem.applyHpChange(judgeTarget, -1, null, wrio);
     } else {
       // 乐不思蜀失效 → 获得1张牌
       if (judgeTarget.handCards.length > 0) {
@@ -2567,28 +2595,18 @@ export class SkillManager {
     const target = aliveOthers.find(p => p.id === targetId)!;
 
     // 目标对每张牌花色进行猜测
-    const suitNames: Record<string, string> = {
+    const suitNames: Record<CardSuit, string> = {
       [SuitType.Spade]: '♠', [SuitType.Heart]: '♥', [SuitType.Club]: '♣', [SuitType.Diamond]: '♦'
     };
-    const suits = Object.values(SuitType).filter(s => s !== SuitType.None);
     const tgtDriver = this.drivers.get(target.id);
-    const tgtDriverAny = tgtDriver as any;
-    
+
     let wrongCount = 0;
-    const guesses: string[] = [];
+    const guesses: CardSuit[] = [];
     for (let ci = 0; ci < topCards.length; ci++) {
-      const correctSuit = topCards[ci].suit;
-      let guess = '';
-      // 逐花色询问（AI默认随机选一个）
-      if (typeof tgtDriverAny?.promptYesNo === 'function') {
-        for (const s of suits) {
-          const yes = await tgtDriverAny.promptYesNo(`【天权】第${ci+1}张牌是 ${suitNames[s]} 吗？`);
-          if (yes) { guess = s; break; }
-        }
-      }
-      if (!guess) guess = suits[Math.floor(Math.random() * suits.length)];
+      const chosen = await tgtDriver?.promptSuit?.(ci + 1, topCards.length);
+      const guess = chosen ?? CARD_SUITS[Math.floor(Math.random() * CARD_SUITS.length)];
       guesses.push(guess);
-      if (guess !== correctSuit) wrongCount++;
+      if (guess !== topCards[ci].suit) wrongCount++;
     }
 
     // ========== 公开播报 ==========
@@ -2716,7 +2734,7 @@ export class SkillManager {
     data.knowledgeUsedThisTurn = count + 1;
 
     this.eventBus.emit(GameEvent.Log, {
-      message: `${player.name} 发动【知论】，将 ${getCardDetail(card)} 置于武将牌上（共${data.knowledgeCards.length}张）。`
+      message: `${player.name} 发动【知论】，将一张牌扣置于武将牌上（共 ${data.knowledgeCards.length} 张）。`
     });
     VoiceManager.getInstance().playSkillVoice('alhaitham', '知论', player.id);
     return true;
@@ -2895,11 +2913,12 @@ export class SkillManager {
     if (!data.spiedTargets) data.spiedTargets = [];
     data.spiedTargets.push(target.id);
 
-      this.eventBus.emit(GameEvent.Log, {
-        message: `【幽客】${player.name} 查看了 ${target.name} 的身份：${getRoleChineseName(target.role)}`
-      });
-      VoiceManager.getInstance().playSkillVoice('yelan', '幽客', player.id);
-      return true;
+    this.eventBus.emit(GameEvent.Log, {
+      visibleTo: [player.id],
+      message: `【幽客】${player.name} 查看了 ${target.name} 的身份：${getRoleChineseName(target.role)}`,
+    });
+    VoiceManager.getInstance().playSkillVoice('yelan', '幽客', player.id);
+    return true;
   }
 
   /** 夜兰-幽客：检查被查看者死亡获得额外回合 */
@@ -2991,15 +3010,15 @@ export class SkillManager {
     const redCards = judgeCards.filter(c => c.suit === SuitType.Heart || c.suit === SuitType.Diamond);
 
     // 为每张判定牌发出事件 + 那维莱特龙权
-    judgeCards.forEach((c, i) => {
+    for (const [i, c] of judgeCards.entries()) {
       const isRedCard = c.suit === SuitType.Heart || c.suit === SuitType.Diamond;
       this.eventBus.emit(GameEvent.JudgeResult, {
         playerId: player.id, kitName: '花舞',
         cardName: c.name, suit: c.suit, number: c.number,
         triggered: isRedCard, judgeIndex: i, totalJudge: 3,
       });
-      this.onAfterJudge(player, c, '花舞', isRedCard);
-    });
+      await this.onAfterJudge(player, c, '花舞', isRedCard);
+    }
 
     this.eventBus.emit(GameEvent.Log, {
       message: `【花舞】${player.name} 判定3张牌：${judgeCards.map(c => getCardDetail(c)).join(', ')}`
@@ -3165,7 +3184,7 @@ export class SkillManager {
   }
 
   /** 迪希雅-佣兵：承担伤害 */
-  onDehyaMercenaryProtect(target: PlayerState, damage: number): { protect: boolean; damage: number } {
+  async onDehyaMercenaryProtect(target: PlayerState, damage: number): Promise<{ protect: boolean; damage: number }> {
     if (target.heroId === 'dehya') return { protect: false, damage };
     const dehya = this.allPlayers.find(p => !p.isDead && p.heroId === 'dehya');
     if (!dehya) return { protect: false, damage };
@@ -3176,7 +3195,7 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, {
       message: `【佣兵】${dehya.name} 为 ${target.name} 承担 ${damage} 点伤害！`
     });
-    this.damageSystem.applyHpChange(dehya, -damage, null, target);
+    await this.damageSystem.applyHpChange(dehya, -damage, null, target);
     return { protect: true, damage: 0 };
   }
 
@@ -4026,7 +4045,7 @@ export class SkillManager {
       const card = player.handCards.splice(cardIdx, 1)[0];
       data.kayeaMarkers.push(card);
       this.eventBus.emit(GameEvent.Log, {
-        message: `【午后】${player.name} 将 ${getCardDetail(card)} 扣置为标记。（共${data.kayeaMarkers.length}张）`
+        message: `【午后】${player.name} 将一张牌扣置为标记（共 ${data.kayeaMarkers.length} 张）。`
       });
     }
 
@@ -4139,7 +4158,7 @@ export class SkillManager {
       const card = player.handCards.splice(cardIdx, 1)[0];
       data.dilucMarkers.push(card);
       this.eventBus.emit(GameEvent.Log, {
-        message: `【晨曦】${player.name} 将 ${getCardDetail(card)} 扣置为标记。（共${data.dilucMarkers.length}张）`
+        message: `【晨曦】${player.name} 将一张牌扣置为标记（共 ${data.dilucMarkers.length} 张）。`
       });
     }
     if (data.dilucMarkers.length > 0) {
@@ -5147,17 +5166,19 @@ export class SkillManager {
     // 目标须再弃置一张牌
     if (player.handCards.length > 0) {
       const driver = this.drivers.get(player.id)!;
-      const discardIdxs = await (driver as any).promptDiscardMulti?.(player, 1, this.buildContext(player.id)) ?? [];
-      if (discardIdxs.length > 0) {
-        for (const idx of discardIdxs) {
-          if (idx >= 0 && idx < player.handCards.length) {
-            const c = player.handCards.splice(idx, 1)[0];
-            this.deck.sendToDiscard(c);
-            this.eventBus.emit(GameEvent.Log, {
-              message: `${player.name} 因【秘闻】额外弃置了 ${getCardDetail(c)}`
-            });
-          }
-        }
+      const discardIdxs = await (driver as any).promptDiscardMulti?.(player, 1, {
+        ...this.buildContext(player.id), discardPrompt: { title: '秘闻', handOnly: true },
+      }) ?? [];
+      const selected = Array.isArray(discardIdxs) ? discardIdxs.find((index: unknown) =>
+        typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < player.handCards.length) : undefined;
+      // This discard is mandatory; an automatic choice or malformed reply cannot skip it.
+      const c = player.handCards.splice(selected ?? 0, 1)[0];
+      if (c) {
+        c.cardSource = player;
+        this.deck.sendToDiscard(c);
+        this.eventBus.emit(GameEvent.Log, {
+          message: `${player.name} 因【秘闻】额外弃置了 ${getCardDetail(c)}`
+        });
       }
     }
   }
@@ -5540,10 +5561,10 @@ export class SkillManager {
   // ========== 法尔伽 - 远征·北风·写信 ==========
 
   private addVarkaSkills(skills: SkillInfo[], player: PlayerState, ctx: GameContextSnapshot): void {
-    const data = this.getData(player.id);
+    const target = this.allPlayers.find(p => p.id === this.getVarkaLetterTarget(player.id));
     skills.push({
       id: 'varka_write', name: '写信',
-      description: `将一张手牌扣置于一名其他角色的武将牌上，本回合对其出杀时无视距离。该角色的下回合开始时，其获得此牌。${data.varkaLetterTarget ? `（目标：${this.allPlayers.find(p=>p.id===data.varkaLetterTarget)?.name||'?'}）` : ''}`,
+      description: `将一张手牌扣置于一名其他角色的武将牌上，本回合对其出杀时无视距离。该角色的下回合开始时，其获得此牌。${target ? `（目标：${target.name}）` : ''}`,
       type: 'active', usable: (p, c) => p.id === (c.currentPlayerId) && p.handCards.length > 0,
     });
     skills.push({ id: 'varka_expedition', name: '远征', description: '当你使用【杀】指定距离大于1的角色为目标时，你摸一张牌。', type: 'trigger', usable: () => false });
@@ -5558,18 +5579,21 @@ export class SkillManager {
 
     // 选一张牌（AI选评分最差的）
     const cardIdx = await driverAny.promptSelectCard?.(player, '写信-选择一张手牌扣置', () => true, ctx) ?? -1;
-    if (cardIdx < 0) return false;
-    const card = player.handCards.splice(cardIdx, 1)[0];
-    data.varkaLetterCard = card; // 存储但不计入手牌
+    const card = player.handCards[cardIdx];
+    if (!card) return false;
 
     // 选目标
     const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
     const targetId = await driver.promptTarget(player, aliveOthers.map(p => p.id), '写信-选择目标角色', ctx);
-    if (targetId === null) { player.handCards.splice(cardIdx, 0, card); return false; }
-    data.varkaLetterTarget = targetId;
+    const target = aliveOthers.find(p => p.id === targetId);
+    if (!target) return false;
+    player.handCards.splice(cardIdx, 1);
+    const targetData = this.getData(target.id);
+    (targetData.varkaLetters ||= []).push(card);
+    data.varkaLetterTarget = target.id;
 
     this.eventBus.emit(GameEvent.Log, {
-      message: `【写信】${player.name} 将一张牌扣置于 ${aliveOthers.find(p => p.id === targetId)!.name} 的武将牌上，本回合对其出杀无视距离！`
+      message: `【写信】${player.name} 将一张牌扣置于 ${target.name} 的武将牌上，本回合对其出杀无视距离！`
     });
     VoiceManager.getInstance().playSkillVoice('varka', '写信', player.id);
     return true;
@@ -5605,8 +5629,8 @@ export class SkillManager {
 
   /** 法尔伽：获取写信标记目标，本回合对其无视距离 */
   getVarkaLetterTarget(sourceId: number): number | null {
-    const data = this.getData(sourceId);
-    return data.varkaLetterTarget ?? null;
+    if (this.currentTurnPlayerId !== sourceId) return null;
+    return this.playerSkillData.get(sourceId)?.varkaLetterTarget ?? null;
   }
 
   // ========== 阿贝多 - 炼金 ==========
@@ -5734,14 +5758,16 @@ export class SkillManager {
   /** 伊涅芙-破镜：连续两张牌点数和为11（在onAfterCardPlay中调用） */
   inevMirrorCheck(player: PlayerState, cardJustPlayed: Card): void {
     if (player.heroId !== 'inev') return;
-    // 机娘：打出J/Q/K时触发语音
+    const modNum = this.getModNumber(cardJustPlayed.number);
     if (cardJustPlayed.number > 10) {
+      this.eventBus.emit(GameEvent.Log, {
+        message: `【机娘】${player.name} 打出 ${getCardDetail(cardJustPlayed)}，点数按 ${modNum} 计算。`,
+      });
       VoiceManager.getInstance().playSkillVoice('inev', '机娘', player.id);
     }
     const data = this.getData(player.id);
     const lastNumber = data.inevLastCardNumber;
-    if (lastNumber === undefined) { data.inevLastCardNumber = this.getModNumber(cardJustPlayed.number); return; }
-    const modNum = this.getModNumber(cardJustPlayed.number);
+    if (lastNumber === undefined) { data.inevLastCardNumber = modNum; return; }
     const modLast = this.getModNumber(lastNumber);
     if (modLast + modNum === 11) {
       this.deck.drawCards(player, 2);
@@ -5841,13 +5867,13 @@ export class SkillManager {
   async tighnariBiologyPrompt(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
     if (player.heroId !== 'tighnari') return false;
     const driver = this.drivers.get(player.id)!;
-    const driverAny = driver as any;
-    const useIt = await driverAny.promptYesNo?.('【生论】是否额外指定一名其他角色也回复1点体力？') ?? false;
+    const targets = this.getPeachHealingTargets(player, driver);
+    if (targets.length === 0) return false;
+    const useIt = await driver.promptYesNo?.('【生论】是否额外指定一名其他角色也回复1点体力？') ?? false;
     if (!useIt) return false;
-    const aliveOthers = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
-    const targetId = await driverAny.promptTarget?.(player, aliveOthers.map(p => p.id), '生论-选择额外回复目标', ctx) ?? null;
-    if (targetId === null) return false;
-    const target = aliveOthers.find(p => p.id === targetId)!;
+    const targetId = await driver.promptTarget(player, targets.map(p => p.id), '生论-选择额外回复目标', ctx);
+    const target = targets.find(p => p.id === targetId);
+    if (!target) return false;
     target.hp = Math.min(target.maxHp, target.hp + 1);
     this.eventBus.emit(GameEvent.Log, { message: `【生论】${target.name} 也回复了1点体力！HP: ${target.hp}/${target.maxHp}` });
     VoiceManager.getInstance().playSkillVoice('tighnari', '生论', player.id);
@@ -6380,20 +6406,22 @@ export class SkillManager {
   private async sigewinneNurse(player: PlayerState, ctx: GameContextSnapshot): Promise<boolean> {
     const data = this.getData(player.id);
     const driver = this.drivers.get(player.id)!;
-    const driverAny = driver as any;
+    const targets = this.getPeachHealingTargets(player, driver);
+    if (targets.length === 0) return false;
     // 选择一张桃弃置
     const peachIdx = player.handCards.findIndex(c => c.name === '桃');
     if (peachIdx < 0) return false;
-    const cardIdx = await driverAny.promptSelectCard?.(player, '护士-选择一张【桃】弃置', (c: Card) => c.name === '桃', ctx) ?? peachIdx;
-    if (cardIdx < 0 || cardIdx >= player.handCards.length || player.handCards[cardIdx].name !== '桃') return false;
-    const peach = player.handCards.splice(cardIdx, 1)[0];
-    this.deck.sendToDiscard(peach);
+    const cardIdx = await driver.promptSelectCard?.(player, '护士-选择一张【桃】弃置', c => c.name === '桃', ctx) ?? peachIdx;
+    const peach = player.handCards[cardIdx];
+    if (peach?.name !== '桃') return false;
 
     // 选择目标
-    const others = getAlivePlayers(this.allPlayers).filter(p => p.id !== player.id);
-    const targetId = await driver.promptTarget(player, others.map(p => p.id), '护士-令谁回复体力？', ctx);
-    if (targetId === null || targetId === undefined) { player.handCards.splice(cardIdx, 0, peach); return false; }
-    const target = others.find(p => p.id === targetId)!;
+    const targetId = await driver.promptTarget(player, targets.map(p => p.id), '护士-令谁回复体力？', ctx);
+    const target = targets.find(p => p.id === targetId);
+    const currentCardIdx = player.handCards.indexOf(peach);
+    if (!target || currentCardIdx < 0) return false;
+    player.handCards.splice(currentCardIdx, 1);
+    this.deck.sendToDiscard(peach);
 
     data.sigewinneNurseUsed = true;
     target.hp = Math.min(target.maxHp, target.hp + 1);
@@ -6401,6 +6429,11 @@ export class SkillManager {
     this.eventBus.emit(GameEvent.Log, { message: `【护士】${player.name} 弃置【桃】令 ${target.name} 回复1点体力。HP: ${target.hp}/${target.maxHp}` });
     VoiceManager.getInstance().playSkillVoice('sigewinne', '护士', player.id);
     return true;
+  }
+
+  private getPeachHealingTargets(player: PlayerState, driver: IPlayerDriver): PlayerState[] {
+    return this.allPlayers.filter(target => !target.isDead && target.id !== player.id &&
+      (!driver.isAutomated || (target.hp < target.maxHp && areRescueTeammates(player, target))));
   }
 
   /** 希格雯-温度：桃回复量+2（外部检测） */

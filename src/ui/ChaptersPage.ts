@@ -1,225 +1,224 @@
-// ============================================================
-// ChaptersPage.ts — PVE 闯关选择页面（使用动态关卡数据）
-// ============================================================
-
 import { router } from './router';
-import { CHAPTERS, getPVEStarRecords, getChapterStars, isChapterUnlocked, getLevelById, PVEChapter } from '../data/PVELevels';
+import { CHAPTERS, getChapterStars, getPVEStarRecords, isChapterUnlocked, type PVEChapter } from '../data/PVELevels';
 import { socketManager } from '../network/SocketManager';
 import { getHeroById } from '../data/heroes';
+import { getPVEBackground, toCssImage } from './BackgroundAssets';
 
-const DIFFICULTY_COLORS: Record<string, string> = {
-  '简单': '#4caf50', '普通': '#ff9800', '困难': '#f44336', '极难': '#9c27b0',
-};
+const CHAPTER_NUMBERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 
-/** 获取当前玩家等级 */
 function getPlayerLevel(): number {
-  const lv = socketManager.account?.level;
-  if (typeof lv === 'number' && lv > 0) return lv;
-  // 从服务端账号获取等级
-  if (socketManager.account != null && typeof socketManager.account.level === 'number' && socketManager.account.level > 0) {
-    return socketManager.account.level;
-  }
-  return 1;
+  const level = socketManager.account?.level;
+  return typeof level === 'number' && level > 0 ? level : 1;
 }
 
 export class ChaptersPage {
   private el!: HTMLElement;
   private currentIndex = 0;
-  private trackEl!: HTMLElement;
-  private dotsEl!: HTMLElement;
+  private chapterButtons: HTMLButtonElement[] = [];
+  private detailEl!: HTMLElement;
+  private playerLevelEl!: HTMLElement;
 
   render(): HTMLElement {
-    const container = document.createElement('div');
-    container.className = 'page chapters-page';
-    container.innerHTML = `
-      <button class="btn btn-ghost back-btn" id="chapters-back">← 返回主页</button>
-      <div class="chapter-scroll" id="chapter-scroll">
-        <div class="chapter-track" id="chapter-track"></div>
-        <button class="scroll-arrow left" id="arrow-left">◀</button>
-        <button class="scroll-arrow right" id="arrow-right">▶</button>
+    this.el = document.createElement('div');
+    this.el.className = 'page chapters-page';
+    this.el.innerHTML = `
+      <header class="pve-header">
+        <button class="pve-back" id="chapters-back" type="button">← 返回主页</button>
+        <h1>PVE 闯关</h1>
+        <span class="pve-player-level"></span>
+      </header>
+      <div class="pve-layout">
+        <nav class="pve-regions" aria-label="章节地区">
+          <h2>地区</h2>
+          <div class="pve-region-list"></div>
+        </nav>
+        <div class="pve-detail"></div>
       </div>
-      <div class="chapter-dots" id="chapter-dots"></div>
     `;
-    this.trackEl = container.querySelector('#chapter-track')!;
-    this.dotsEl = container.querySelector('#chapter-dots')!;
-
-    const playerLv = getPlayerLevel();
-    CHAPTERS.forEach((ch, i) => {
-      const card = document.createElement('div');
-      card.className = `chapter-card chapter-${ch.cssClass}`;
-      const unlocked = isChapterUnlocked(ch, playerLv);
-      const starsRecord = getPVEStarRecords();
-      const totalStars = ch.levels.reduce((s, l) => s + (starsRecord[l.id] || 0), 0);
-      const hasContent = ch.levels.length > 0;
-
-      let statusHtml = '';
-      if (ch.placeholder) {
-        statusHtml = '<div class="chapter-status locked-status">🚧 该地图暂未制作</div>';
-      } else if (!unlocked) {
-        const prevIdx = CHAPTERS.findIndex(c => c.id === ch.id) - 1;
-        const prevChapter = prevIdx >= 0 ? CHAPTERS[prevIdx] : null;
-        if (playerLv < ch.requiredLevel) {
-          statusHtml = `<div class="chapter-status locked-status">🔒 需要等级 ${ch.requiredLevel} 解锁</div>`;
-        } else if (prevChapter) {
-          const prevStars = getChapterStars(prevChapter.id);
-          statusHtml = `<div class="chapter-status locked-status">🔒 需${prevChapter.name}累计${prevStars}/20星</div>`;
-        } else {
-          statusHtml = '<div class="chapter-status locked-status">🔒 未解锁</div>';
-        }
-      } else if (hasContent) {
-        const maxStars = ch.levels.length * 3;
-        statusHtml = `<div class="chapter-status">⭐ ${totalStars}/${maxStars} 星 · 已开放</div>`;
-      }
-
-      card.innerHTML = `
-        <div class="chapter-content">
-          <div class="chapter-number">第${this.toChineseNum(i + 1)}章</div>
-          <div class="chapter-name">${ch.name}</div>
-          <div class="chapter-name-en">${ch.nameEn}</div>
-          <div class="chapter-desc">${ch.desc}</div>
-          <div class="chapter-progress">${hasContent ? `共${ch.levels.length}关` : '暂无关卡'}</div>
-          ${statusHtml}
-          <div class="chapter-hint">点击进入关卡 →</div>
-        </div>
+    this.detailEl = this.el.querySelector('.pve-detail')!;
+    this.playerLevelEl = this.el.querySelector('.pve-player-level')!;
+    const chapterList = this.el.querySelector('.pve-region-list')!;
+    this.chapterButtons = CHAPTERS.map((chapter, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'pve-region';
+      button.style.setProperty('--chapter-scene', toCssImage(getPVEBackground(chapter.id, chapter.region)));
+      button.innerHTML = `
+        <span class="pve-region-image" aria-hidden="true"></span>
+        <span class="pve-region-text">
+          <strong>${chapter.name}</strong>
+          <span class="pve-region-status"></span>
+        </span>
       `;
-      card.addEventListener('click', () => this.openLevels(ch, playerLv));
-      this.trackEl.appendChild(card);
-
-      const dot = document.createElement('div');
-      dot.className = `chapter-dot${i === 0 ? ' active' : ''}`;
-      dot.addEventListener('click', () => this.scrollTo(i));
-      this.dotsEl.appendChild(dot);
+      button.addEventListener('click', () => this.selectChapter(index));
+      button.addEventListener('keydown', event => this.navigateChapters(event, index));
+      chapterList.appendChild(button);
+      return button;
     });
 
-    container.querySelector('#chapters-back')!.addEventListener('click', () => router.navigate('home'));
-    container.querySelector('#arrow-left')!.addEventListener('click', () => this.scrollPrev());
-    container.querySelector('#arrow-right')!.addEventListener('click', () => this.scrollNext());
-
-    let touchStartX = 0;
-    const scrollArea = container.querySelector('#chapter-scroll')!;
-    scrollArea.addEventListener('touchstart', e => { touchStartX = (e as TouchEvent).touches[0].clientX; });
-    scrollArea.addEventListener('touchend', e => {
-      const dx = (e as TouchEvent).changedTouches[0].clientX - touchStartX;
-      if (dx > 50) this.scrollPrev(); else if (dx < -50) this.scrollNext();
-    });
-
-    this.el = container;
-    return container;
-  }
-
-  private scrollTo(index: number): void {
-    if (index < 0 || index >= CHAPTERS.length) return;
-    this.currentIndex = index;
-    this.trackEl.style.transform = `translateX(-${index * 100}vw)`;
-    this.dotsEl.querySelectorAll('.chapter-dot').forEach((d, i) => d.classList.toggle('active', i === index));
-  }
-  private scrollPrev(): void { this.scrollTo(this.currentIndex - 1); }
-  private scrollNext(): void { this.scrollTo(this.currentIndex + 1); }
-
-  private openLevels(chapter: PVEChapter, playerLv: number): void {
-    const unlocked = isChapterUnlocked(chapter, playerLv);
-    if (!unlocked) {
-      if (chapter.placeholder) {
-        alert('🚧 该地图暂未制作，敬请期待！');
-      } else {
-        alert('🔒 等级 / 星级未满足解锁地图的需求。');
+    this.el.querySelector('#chapters-back')!.addEventListener('click', () => router.navigate('home'));
+    this.detailEl.addEventListener('click', event => {
+      if (!(event.target instanceof Element)) return;
+      const levelButton = event.target.closest<HTMLButtonElement>('button[data-level-id]');
+      if (!levelButton) return;
+      const chapter = CHAPTERS[this.currentIndex];
+      const levelId = Number(levelButton.dataset.levelId);
+      if (!isChapterUnlocked(chapter, getPlayerLevel())) {
+        this.refresh();
+        return;
       }
-      return;
-    }
-    if (chapter.levels.length === 0) {
-      alert('该章节暂无关卡数据。');
-      return;
-    }
+      if (chapter.levels.some(level => level.id === levelId)) {
+        router.navigate('game', { mode: 'pve', chapterId: chapter.id, levelId });
+      }
+    });
 
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay level-modal';
-    const starsRecord = getPVEStarRecords();
-    const totalAvailableStars = chapter.levels.length * 3;
-    const currentStars = getChapterStars(chapter.id);
+    this.refresh();
+    return this.el;
+  }
 
-    overlay.innerHTML = `
-      <div class="modal-box level-modal-box">
-        <h2>${chapter.name} · 关卡选择</h2>
-        <p style="text-align:center;color:var(--text-secondary);">⭐ 累计 ${currentStars}/${totalAvailableStars} 星</p>
-        <div class="level-list">
-          ${chapter.levels.map((lv, idx) => {
-            const stars = starsRecord[lv.id] || 0;
-            const starStr = '⭐'.repeat(stars) + '☆'.repeat(3 - stars);
-            return `
-              <div class="level-item" data-level="${lv.id}" data-chapter="${chapter.id}">
-                <div class="level-left">
-                  <div class="level-num">第${idx + 1}关</div>
-                  <div class="level-name">${lv.name}</div>
-                </div>
-                <div class="level-right">
-                  <div class="level-stars">${starStr}</div>
-                  <span class="level-go">进入 ▶</span>
-                </div>
-              </div>
-            `;
-          }).join('')}
+  private navigateChapters(event: KeyboardEvent, index: number): void {
+    let nextIndex: number;
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = Math.max(0, index - 1);
+        break;
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = Math.min(CHAPTERS.length - 1, index + 1);
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = CHAPTERS.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    this.selectChapter(nextIndex);
+    this.chapterButtons[nextIndex].focus();
+  }
+
+  private selectChapter(index: number): void {
+    if (index === this.currentIndex) return;
+    this.currentIndex = index;
+    this.refresh();
+    this.detailEl.scrollTop = 0;
+  }
+
+  private refresh(): void {
+    const playerLevel = getPlayerLevel();
+    const records = getPVEStarRecords();
+    const levelStars = (id: number) => Math.min(3, Math.max(0, Math.trunc(Number(records[id]) || 0)));
+    this.playerLevelEl.textContent = `冒险等级 ${playerLevel}`;
+    CHAPTERS.forEach((chapter, index) => {
+      const button = this.chapterButtons[index];
+      const isCurrent = index === this.currentIndex;
+      if (isCurrent) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+      const unlocked = isChapterUnlocked(chapter, playerLevel);
+      const stars = chapter.levels.reduce((sum, level) => sum + levelStars(level.id), 0);
+      button.dataset.state = chapter.placeholder ? 'unavailable' : unlocked ? 'open' : 'locked';
+      button.querySelector('.pve-region-status')!.textContent = chapter.placeholder
+        ? '暂未开放'
+        : unlocked ? `${stars} / ${chapter.levels.length * 3} 星` : '待解锁';
+    });
+
+    const chapter = CHAPTERS[this.currentIndex];
+    const unlocked = isChapterUnlocked(chapter, playerLevel);
+    const stars = chapter.levels.reduce((sum, level) => sum + levelStars(level.id), 0);
+    const completed = chapter.levels.filter(level => levelStars(level.id) > 0).length;
+    const maxStars = chapter.levels.length * 3;
+    this.detailEl.style.setProperty('--chapter-scene', toCssImage(getPVEBackground(chapter.id, chapter.region)));
+    this.detailEl.innerHTML = `
+      <section class="pve-banner" aria-labelledby="pve-chapter-title">
+        <div class="pve-banner-copy">
+          <p class="pve-chapter-index">第${CHAPTER_NUMBERS[this.currentIndex] ?? this.currentIndex + 1}章</p>
+          <h2 id="pve-chapter-title">${chapter.name}</h2>
+          <p class="pve-chapter-desc">${chapter.desc}</p>
         </div>
-        <div style="text-align:center;margin-top:16px;">
-          <button class="btn btn-ghost" id="level-close">关闭</button>
-        </div>
-      </div>
+        ${unlocked && maxStars ? `
+          <div class="pve-progress">
+            <div class="pve-progress-title">
+              <span>章节星级</span>
+              <strong>${stars}<small> / ${maxStars}</small></strong>
+            </div>
+            <progress aria-label="章节累计星级" max="${maxStars}" value="${stars}"></progress>
+            <p>已通关 ${completed} / ${chapter.levels.length} 关</p>
+          </div>
+        ` : ''}
+      </section>
+      ${unlocked && chapter.levels.length ? `
+        <section class="pve-missions" aria-labelledby="pve-missions-title">
+          <h3 id="pve-missions-title">关卡</h3>
+          <div class="pve-level-grid">
+            ${chapter.levels.map((level, index) => {
+              const enemies = level.enemyHeroes.map(getHeroById);
+              const hero = enemies.find(enemy => enemy && level.name.includes(enemy.name)) ?? enemies[0];
+              const stars = levelStars(level.id);
+              return `
+                <button class="pve-level-card" type="button" data-level-id="${level.id}">
+                  <span class="pve-level-art" aria-hidden="true">
+                    <span>${hero?.name.charAt(0) ?? '·'}</span>
+                    ${hero ? `<img src="Resources/Characters/${hero.name}.png" alt="" loading="lazy" decoding="async">` : ''}
+                  </span>
+                  <span class="pve-level-copy">
+                    <span class="pve-level-number">第 ${index + 1} 关</span>
+                    <strong class="pve-level-name">${level.name}</strong>
+                    <span class="pve-level-teams">我方 ${level.allyCount} 人 · 敌方 ${level.enemyCount} 人</span>
+                  </span>
+                  <span class="pve-level-footer">
+                    <span class="pve-level-stars" role="img" aria-label="最高 ${stars} 星，共 3 星">
+                      <span aria-hidden="true">${'★'.repeat(stars)}</span><span class="pve-unearned" aria-hidden="true">${'☆'.repeat(3 - stars)}</span>
+                    </span>
+                    <span class="pve-level-action">开始 <span aria-hidden="true">→</span></span>
+                  </span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </section>
+      ` : this.renderChapterAvailability(chapter, playerLevel, unlocked)}
     `;
 
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelector('#level-close')!.addEventListener('click', () => overlay.remove());
-    overlay.querySelectorAll('.level-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const el = item as HTMLElement;
-        const levelId = el.dataset.level!;
-        const chapterId = el.dataset.chapter!;
-        overlay.remove();
-        router.navigate('game', { mode: 'pve', chapterId, levelId: parseInt(levelId) });
-      });
+    this.detailEl.querySelectorAll<HTMLImageElement>('.pve-level-art img').forEach(img => {
+      img.addEventListener('error', () => { img.hidden = true; }, { once: true });
     });
-
-    document.body.appendChild(overlay);
   }
 
-  private toChineseNum(n: number): string {
-    const map = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
-    return map[n] || String(n);
+  private renderChapterAvailability(chapter: PVEChapter, playerLevel: number, unlocked: boolean): string {
+    if (chapter.placeholder || unlocked) {
+      return '<section class="pve-availability"><h3>该地区暂未开放</h3></section>';
+    }
+    const previous = CHAPTERS[this.currentIndex - 1];
+    const previousStars = previous ? Number(getChapterStars(previous.id)) || 0 : 0;
+    return `
+      <section class="pve-availability">
+        <h3>解锁条件</h3>
+        <ul>
+          <li>
+            <span>冒险等级达到 ${chapter.requiredLevel} 级</span>
+            <span class="pve-condition" data-met="${playerLevel >= chapter.requiredLevel}">当前 ${playerLevel} 级</span>
+          </li>
+          ${previous && chapter.id !== 'mondstadt' ? `
+            <li>
+              <span>${previous.name}累计获得 20 星</span>
+              <span class="pve-condition" data-met="${previousStars >= 20}">当前 ${previousStars} 星</span>
+            </li>
+          ` : ''}
+        </ul>
+      </section>
+    `;
   }
 
-  show(): void { this.el.classList.add('active'); this.refreshStars(); }
-  hide(): void { this.el.classList.remove('active'); }
+  show(): void {
+    this.el.classList.add('active');
+    this.refresh();
+  }
 
-  /** 重新读取本地星级数据并更新DOM中的星级显示 */
-  private refreshStars(): void {
-    const starsRecord = getPVEStarRecords();
-    const cards = this.trackEl.querySelectorAll('.chapter-card');
-    let cardIdx = 0;
-    CHAPTERS.forEach((ch) => {
-      if (cardIdx >= cards.length) return;
-      const card = cards[cardIdx];
-      const statusEl = card.querySelector('.chapter-status');
-      if (!statusEl) { cardIdx++; return; }
-      const unlocked = isChapterUnlocked(ch, getPlayerLevel());
-      const totalStars = ch.levels.reduce((s, l) => s + (starsRecord[l.id] || 0), 0);
-      if (ch.placeholder) {
-        // 占位章节不变
-      } else if (!unlocked) {
-        const prevIdx = CHAPTERS.findIndex(c => c.id === ch.id) - 1;
-        const prevChapter = prevIdx >= 0 ? CHAPTERS[prevIdx] : null;
-        const playerLv = getPlayerLevel();
-        if (playerLv < ch.requiredLevel) {
-          statusEl.innerHTML = `🔒 需要等级 ${ch.requiredLevel} 解锁`;
-          statusEl.className = 'chapter-status locked-status';
-        } else if (prevChapter) {
-          const prevStars = getChapterStars(prevChapter.id);
-          statusEl.innerHTML = `🔒 需${prevChapter.name}累计${prevStars}/20星`;
-          statusEl.className = 'chapter-status locked-status';
-        }
-      } else if (ch.levels.length > 0) {
-        const maxStars = ch.levels.length * 3;
-        statusEl.innerHTML = `⭐ ${totalStars}/${maxStars} 星 · 已开放`;
-        statusEl.className = 'chapter-status';
-      }
-      cardIdx++;
-    });
+  hide(): void {
+    this.el.classList.remove('active');
   }
 }

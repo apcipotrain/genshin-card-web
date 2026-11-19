@@ -1,0 +1,66 @@
+/* Keep card hit areas inside their own scroller, separate from the skill column. */
+.game-page .hand-main-area,
+.game-page .hand-cards-scroll {
+  min-width: 0;
+}
+.game-page .hand-cards-scroll {
+  flex: 1 1 0;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: 8px;
+}
+.game-page .hand-cards-row {
+  width: max-content;
+  min-width: 100%;
+}
+
+/* Zone decisions can have four choices; two-action confirmation rows stay level. */
+.game-page .table-zone-choices.table-interaction-actions {
+  flex-wrap: wrap;
+}
+.game-page .table-zone-choices.table-interaction-actions .btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
+/*
+ * Eight fixed-size seats, four equipment slots and a skill column need a desktop
+ * canvas. Below desktop width, scroll that canvas rather than squeezing the hand
+ * underneath the skills. The 980px main area matches the existing 1280px layout;
+ * no seat positions, card sizes or desktop sidebar dimensions are changed.
+ */
+@media (max-width: 1279px) {
+  .game-page {
+    --battle-canvas-width: 1280px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #8da99f #e6efea;
+  }
+  .game-page #game-main-area {
+    flex: 1 0 980px;
+    min-width: 980px;
+  }
+  .game-page > :is(.game-bg, .game-bg-cross) {
+    min-width: var(--battle-canvas-width);
+  }
+  .game-page::-webkit-scrollbar {
+    height: 10px;
+  }
+  .game-page::-webkit-scrollbar-track {
+    background: #e6efea;
+  }
+  .game-page::-webkit-scrollbar-thumb {
+    border: 2px solid #e6efea;
+    border-radius: 6px;
+    background: #8da99f;
+  }
+}
+@media (max-width: 1100px) {
+  .game-page { --battle-canvas-width: 1190px; }
+}

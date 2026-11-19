@@ -1,0 +1,85 @@
+/* Battle HUD refinement. Seat geometry and background pools stay in their owning stylesheets. */
+.game-page .game-top-bar {
+  background: linear-gradient(115deg, rgba(249, 251, 247, .93), rgba(234, 244, 242, .88));
+  border-color: rgba(255, 253, 236, .85);
+  box-shadow: 0 5px 22px rgba(27, 53, 66, .12);
+  backdrop-filter: blur(12px);
+}
+.game-page .game-top-right { color: #415d67; font-variant-numeric: tabular-nums; }
+.game-page .deck-remaining { color: #415d67; }
+.game-page .game-phase { min-width: 92px; background: #e3efeb; border: 1px solid #b7d0c7; color: #315e56; box-shadow: inset 0 1px #fff; }
+.game-page .game-phase[data-phase="Play"] { background: #f8edcf; border-color: #c9ad64; color: #785a20; }
+.game-page .game-phase[data-phase="Discard"], .game-page .game-phase[data-phase="Judging"] { background: #e7edf5; color: #4c607a; border-color: #b5c4d5; }
+.game-page .pvp-countdown-bar { height: 18px; background: #dbe7e3; border: 1px solid #abc5ba; border-radius: 12px; }
+.game-page .pvp-countdown-text { color: #183e36; text-shadow: 0 1px 2px #fff; font-weight: 800; }
+
+.game-page .seat-card { background: rgba(248, 251, 247, .78); border-color: rgba(200, 214, 197, .95); transition: border-color .18s, box-shadow .18s; }
+.game-page .seat-info-panel { background: rgba(235, 243, 247, .88); }
+.game-page .seat-role { color: #4e6a71; }
+.game-page .seat-info-value { color: #294650; }
+.game-page .seat-card.current-turn { box-shadow: 0 0 0 2px rgba(246, 222, 153, .85), 0 7px 24px rgba(82, 65, 23, .18); }
+.game-page .seat-card.current-turn::before { background: none; filter: none; animation: none; border: 1px solid rgba(233, 202, 112, .6); }
+.game-page .seat-card.current-turn::after { display: none; }
+.game-page .seat-card.targetable { animation: none; outline: 2px dashed #b18736; outline-offset: 3px; }
+.game-page .seat-card.targetable:hover { transform: translateY(-3px); outline-style: solid; box-shadow: 0 8px 22px rgba(117, 86, 23, .25); }
+.game-page .seat-card.critical-hp:not(.dead) .seat-hp { box-shadow: 0 0 0 2px rgba(165, 64, 51, .18); }
+.game-page .seat-card.critical-hp:not(.dead) .seat-info-row:first-child .seat-info-value { color: #a33f35; font-weight: 800; }
+.game-page .seat-card.dead { opacity: .65; border-color: #8b9699; }
+.game-page .seat-card.dead .seat-char-img { filter: grayscale(1); }
+.seat-state-label { position: absolute; top: -10px; right: 8px; z-index: 3; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }
+.seat-state-label.acting { color: #624711; background: #f5e4ac; border: 1px solid #b59344; }
+.seat-state-label.dying { color: #fff6ef; background: #a34b43; border: 1px solid #e2a59b; }
+.seat-state-label.fallen { color: #f4f6f3; background: #586c70; border: 1px solid #b4c3bf; }
+.game-page .seat-judge { padding: 4px 6px; background: rgba(245, 234, 211, .94); border: 1px solid #cbb783; border-radius: 5px; color: #775c2c; line-height: 1.5; }
+
+.game-page .player-zone { background: rgba(235, 245, 242, .58); border-color: rgba(246, 251, 238, .8); backdrop-filter: blur(10px); }
+.game-page .equip-slot { background: rgba(241, 247, 244, .83); color: #425f5b; }
+.game-page .equip-slot.filled { background: #f2e8cc; border-color: #bca269; }
+.game-page .skill-btn { background: rgba(238, 246, 242, .9); color: #405e56; }
+.game-page .skill-btn.active { background: linear-gradient(#fff8df, #eedca7); color: #72501c; box-shadow: 0 2px 7px rgba(82, 66, 26, .13); }
+.game-page .game-card { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.game-page .game-card.playable { animation: none; box-shadow: 0 2px 8px rgba(93, 75, 29, .2); }
+.game-page .game-card:hover { transform: translateY(-10px); box-shadow: 0 9px 20px rgba(33, 61, 65, .25); }
+.game-page .game-card.selected, .game-page .game-card.selected:hover { animation: none; transform: translateY(-18px); box-shadow: 0 0 0 2px #ebce77, 0 9px 20px rgba(57, 59, 33, .25); }
+.game-page .game-card.dimmed { opacity: .5; filter: saturate(.6); }
+.game-page .prompt-bar { border-radius: 10px; box-shadow: 0 5px 25px rgba(29, 57, 61, .2); line-height: 1.6; }
+.game-page :is(.btn-play-confirm, .btn-response-confirm) { animation: none; border-radius: 8px; box-shadow: 0 4px 12px rgba(38, 79, 69, .2); }
+.game-page :is(.btn-play-end, .btn-response-pass) { border-radius: 8px; }
+.game-page button:focus-visible, .game-page [tabindex]:focus-visible { outline: 2px solid #397b6d; outline-offset: 3px; }
+
+.game-page .log-content .battle-log-entry { padding: 7px 8px; margin: 3px 0; border-bottom: 1px solid #e0e7df; border-left: 2px solid transparent; border-radius: 3px; line-height: 1.7; overflow-wrap: anywhere; }
+.battle-log-entry time { display: block; color: #78877f; font-size: 10px; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.game-page .log-content .battle-log-entry[data-kind="damage"] { border-left-color: #b87566; background: #f7eeea; color: #77453c; }
+.game-page .log-content .battle-log-entry[data-kind="heal"] { border-left-color: #6b9d83; background: #eaf3ed; color: #3f6650; }
+.game-page .log-content .battle-log-entry[data-kind="skill"] { border-left-color: #b69c5a; background: #f5f1e3; color: #705b2d; }
+.game-page .log-content .battle-log-entry[data-kind="phase"] { background: #e6eeec; color: #3d635a; font-weight: 600; }
+
+.combat-feedback { position: fixed; z-index: 215; pointer-events: none; display: flex; align-items: center; gap: 9px; padding: 5px 11px; border-radius: 7px; background: rgba(28, 43, 51, .94); border: 1px solid #cf9d80; box-shadow: 0 4px 16px rgba(20, 35, 42, .24); animation: combatFeedbackIn .2s ease-out; }
+.combat-feedback strong { font: 800 32px/1.1 Georgia, serif; color: #ffb4a2; text-shadow: 0 2px 3px #392e2a; }
+.combat-feedback span { font-size: 11px; color: #f7d8ce; }
+.combat-feedback.healing { border-color: #8dccb0; }
+.combat-feedback.healing strong { color: #a7edcc; }
+.combat-feedback.healing span { color: #d2efdf; }
+@keyframes combatFeedbackIn { from { opacity: 0; transform: translateY(9px) scale(.9); } to { opacity: 1; transform: none; } }
+
+.game-page .anim-card { width: 96px; height: 134px; box-shadow: 0 6px 24px rgba(19, 36, 48, .28); border-color: #d5c49d; }
+.game-page .anim-card.flying-from-seat { animation: battleCardToCenter 1.15s ease-in-out forwards; }
+.game-page .anim-card.flying-discard { animation-duration: 1.1s; }
+@keyframes battleCardToCenter {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
+  32%, 76% { opacity: 1; left: var(--card-dest-x); top: var(--card-dest-y); transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; left: var(--card-dest-x); top: var(--card-dest-y); transform: translate(-50%, -45%) scale(.84); }
+}
+.judge-anim-overlay .judge-anim-front { background: linear-gradient(140deg, #294a55, #172d3b); border-color: #d4bf86; }
+.judge-anim-overlay .judge-anim-info { top: calc(50% + 105px); padding: 6px 12px; font-size: 13px; font-weight: 500; color: #f9f1d9; background: rgba(24, 43, 53, .95); border: 1px solid #c5b27f; border-radius: 7px; text-shadow: none; white-space: nowrap; }
+.judge-anim-overlay .judge-anim-result { top: calc(50% - 110px); padding: 5px 13px; font-size: 15px; font-weight: 700; color: #eaf8ee; background: #3f7262; border: 1px solid #b8d5bd; border-radius: 20px; filter: none; }
+.judge-anim-overlay[data-result="ineffective"] .judge-anim-result { color: #f1ebdd; background: #626f79; border-color: #c4cccf; }
+@media (max-width: 1100px) {
+  .game-page .game-top-right { gap: 7px; }
+  .game-page .pvp-countdown-bar { width: 100px; }
+  .seat-state-label { font-size: 9px; padding: 2px 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .combat-feedback, .judge-anim-overlay *, .skill-float-text { animation: none !important; transition: none !important; }
+  .judge-anim-overlay .judge-anim-inner.flipped { transform: rotateY(180deg); }
+}

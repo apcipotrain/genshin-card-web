@@ -1,58 +1,69 @@
 // ============================================================
 // RemotePlayerDriver.ts — 远程玩家的IPlayerDriver（通过Socket.IO通信）
-// 15秒超时自动pass
+// 服务端控制响应截止时间，结束请求后通知客户端清理交互。
 // ============================================================
 
 import type { Socket } from 'socket.io';
-import type { IPlayerDriver, PlayerState, Card, GameContextSnapshot, ZoneSelection } from '../src/core/types.js';
+import { randomUUID } from 'node:crypto';
+import { GameSession } from '../src/core/GameSession.js';
+import { CARD_SUITS, type CardSuit, type IPlayerDriver, type PlayerState, type Card, type GameContextSnapshot, type ZoneSelection } from '../src/core/types.js';
+import { serializeForPvpViewer } from './PvpVisibility.js';
 
 const TIMEOUT_MS = 10000; // 10秒
 
 export class RemotePlayerDriver implements IPlayerDriver {
   readonly playerId: number;
   private socket: Socket;
-  private pendingResolves: Map<string, { resolve: (v: any) => void; timer: NodeJS.Timeout }> = new Map();
+  private pendingResolves: Map<string, { resolve: (v: any) => void; defaultValue: any }> = new Map();
   private requestIdCounter = 0;
+  private readonly requestPrefix = randomUUID();
+  private disposed = false;
+  private unregisterSession: () => void;
+  private readonly onResponse = (data: { requestId: string; result: any }) => {
+    if (!this.disposed && data && typeof data.requestId === 'string') {
+      this.pendingResolves.get(data.requestId)?.resolve(data.result);
+    }
+  };
 
-  constructor(playerId: number, socket: Socket) {
+  constructor(playerId: number, socket: Socket, private session = new GameSession()) {
     this.playerId = playerId;
     this.socket = socket;
 
-    // 监听客户端的响应
-    socket.on('prompt_response', (data: { requestId: string; result: any }) => {
-      const pending = this.pendingResolves.get(data.requestId);
-      if (pending) {
-        clearTimeout(pending.timer);
-        this.pendingResolves.delete(data.requestId);
-        pending.resolve(data.result);
-      }
-    });
+    socket.on('prompt_response', this.onResponse);
+    this.unregisterSession = session.onDispose(() => this.dispose());
   }
 
   /** 更新 socket（重连时调用） */
   updateSocket(socket: Socket): void {
+    if (this.disposed) return;
+    this.socket.off('prompt_response', this.onResponse);
     this.socket = socket;
-    socket.on('prompt_response', (data: { requestId: string; result: any }) => {
-      const pending = this.pendingResolves.get(data.requestId);
-      if (pending) {
-        clearTimeout(pending.timer);
-        this.pendingResolves.delete(data.requestId);
-        pending.resolve(data.result);
-      }
-    });
+    socket.on('prompt_response', this.onResponse);
+  }
+
+  /** Detach a departing player; remaining players may continue against AI. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.socket.off('prompt_response', this.onResponse);
+    this.unregisterSession?.();
+    for (const pending of [...this.pendingResolves.values()]) pending.resolve(pending.defaultValue);
+    this.pendingResolves.clear();
   }
 
   private async request(type: string, data: any, defaultValue: any): Promise<any> {
-    const requestId = String(++this.requestIdCounter);
+    this.session.assertActive();
+    if (this.disposed) return defaultValue;
+    const requestId = `${this.requestPrefix}:${++this.requestIdCounter}`;
 
-    return new Promise<any>(resolve => {
+    return this.session.wait<any>(resolve => {
       const timer = setTimeout(() => {
         this.pendingResolves.delete(requestId);
         console.log(`[RemoteDriver] Player ${this.playerId} timeout on ${type}, defaulting to`, defaultValue);
         resolve(defaultValue);
       }, TIMEOUT_MS);
 
-      this.pendingResolves.set(requestId, { resolve, timer });
+      this.pendingResolves.set(requestId, { resolve, defaultValue });
 
       this.socket.emit('prompt', {
         requestId,
@@ -60,6 +71,11 @@ export class RemotePlayerDriver implements IPlayerDriver {
         data,
         timeoutSec: TIMEOUT_MS / 1000,
       });
+      return () => {
+        clearTimeout(timer);
+        this.pendingResolves.delete(requestId);
+        this.socket.emit('prompt_closed', { requestId });
+      };
     });
   }
 
@@ -169,6 +185,11 @@ export class RemotePlayerDriver implements IPlayerDriver {
     return this.request('yesNo', { question }, false);
   }
 
+  async promptSuit(cardNumber: number, totalCards: number): Promise<CardSuit | null> {
+    const result: unknown = await this.request('chooseSuit', { cardNumber, totalCards }, null);
+    return CARD_SUITS.find(suit => suit === result) ?? null;
+  }
+
   async promptRansackHand?(state: PlayerState, targetId: number, ctx: GameContextSnapshot): Promise<number> {
     return this.request('ransackHand', {
       state: this.sanitizeState(state),
@@ -205,21 +226,11 @@ export class RemotePlayerDriver implements IPlayerDriver {
     });
   }
 
-  // ---------- 状态脱敏（循环引用 + 身份隐藏） ----------
-  // Card.cardSource → Player，Player.handCards/equipZone → Card 形成闭环，
-  // 必须用 JSON.stringify replacer 移除 cardSource 才能序列化通过 socket.emit 发送。
-  // 与 GameHost.sanitizeEventForPlayer 保持一致。
   private sanitizeState(state: PlayerState): any {
-    return JSON.parse(JSON.stringify(state, (key, value) => {
-      if (key === 'cardSource') return null;
-      return value;
-    }));
+    return serializeForPvpViewer(state, this.playerId);
   }
 
   private sanitizeContext(ctx: GameContextSnapshot): any {
-    return JSON.parse(JSON.stringify(ctx, (key, value) => {
-      if (key === 'cardSource') return null;
-      return value;
-    }));
+    return serializeForPvpViewer(ctx, this.playerId);
   }
 }

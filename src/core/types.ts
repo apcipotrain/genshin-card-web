@@ -49,6 +49,9 @@ export enum SuitType {
   Diamond = 'Diamond'
 }
 
+export const CARD_SUITS = [SuitType.Spade, SuitType.Heart, SuitType.Club, SuitType.Diamond] as const;
+export type CardSuit = typeof CARD_SUITS[number];
+
 export enum ColorType {
   Red = 'Red',
   Black = 'Black',
@@ -130,11 +133,11 @@ export interface PlayerState {
   role: RoleType;
   /** PVE阵营（闯关模式） */
   faction?: Faction;
-  /** PVE座位布局索引（0-7，动态人数场用） */
-  pveSeatIndex?: number;
   maxHp: number;
   hp: number;
   handCards: Card[];
+  /** PVP 快照中的武将牌扣置牌张数。 */
+  attachedCardCount?: number;
   equipZone: Record<EquipmentType, Card | null>;
   judgeZone: Card[];
   isFlipped: boolean;
@@ -152,6 +155,8 @@ export interface PlayerState {
 export interface IPlayerDriver {
   /** 玩家标识 */
   readonly playerId: number;
+  /** 由 AI 代做决策的驱动 */
+  readonly isAutomated?: boolean;
 
   /** 出牌阶段：选择出哪张牌，返回手牌索引，-1 表示结束出牌，-2 表示发动丈八蛇矛 */
   promptPlayCard(state: PlayerState, context: GameContextSnapshot): Promise<number>;
@@ -250,6 +255,9 @@ export interface IPlayerDriver {
   /** 通用Yes/No决策 */
   promptYesNo?(question: string): Promise<boolean>;
 
+  /** 为一张未公开的牌选择花色。 */
+  promptSuit?(cardNumber: number, totalCards: number): Promise<CardSuit | null>;
+
   /** 顺手牵羊/过河拆桥手牌区选牌：从target的手牌中选择一张，返回手牌索引，-1表示取消 */
   promptRansackHand?(
     state: PlayerState,
@@ -294,6 +302,10 @@ export interface GameContextSnapshot {
   cardsPlayedThisPhase?: number;
   /** 纳西妲-比喻：选择的锦囊牌名 */
   metaphorCardName?: string;
+  /** 弃牌阶段由回合控制器提供的实际手牌上限。 */
+  discardHandLimit?: number;
+  /** Labels and selectable zones for the shared discard selector. Indices retain their original slots. */
+  discardPrompt?: { title?: string; handOnly?: boolean; excludedCardIds?: number[] };
 }
 
 /** 事件类型 */

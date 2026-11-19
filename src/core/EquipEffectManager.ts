@@ -46,7 +46,7 @@ export class EquipEffectManager {
     // 顶替旧装备
     if (source.equipZone[slot]) {
       const oldEquip = source.equipZone[slot]!;
-      this.deck.sendToDiscard(oldEquip);
+      this.deck.sendToDiscard(oldEquip, 'equipment-replaced');
       // 防具离场效果
       if (slot === EquipmentType.Armor) {
         this.handleArmorOnLose(source, oldEquip);
@@ -329,72 +329,54 @@ export class EquipEffectManager {
   /** 为贯石斧弃置2张牌：让玩家主动选择 */
   private async discardTwoForWeapon(source: PlayerState, weapon: Card): Promise<void> {
     const driver = this.drivers.get(source.id)!;
-    const handLen = source.handCards.length;
+    const handCards = [...source.handCards];
+    // Use the same index space as the UI: hand cards, then every non-empty
+    // equipment slot. The axe keeps its index but cannot be selected as cost.
     const equipCards = Object.entries(source.equipZone)
-      .filter(([, v]) => v !== null && v !== weapon) as [string, Card][];
-    const totalAvailable = handLen + equipCards.length;
+      .filter(([, card]) => card !== null) as [EquipmentType, Card][];
+    const totalAvailable = handCards.length + equipCards.filter(([, card]) => card !== weapon).length;
+    const reply = totalAvailable >= 2
+      ? await driver.promptDiscardMulti?.(source, 2, {
+        ...this.buildContext(source.id), discardPrompt: { title: '贯石斧', excludedCardIds: [weapon.id] },
+      })
+      : [];
+    const indices: unknown[] = Array.isArray(reply) ? reply : [];
+    const discarded = new Set<Card>();
 
-    if (totalAvailable < 2) {
-      // 不够2张，全弃
-      let discarded = 0;
-      while (source.handCards.length > 0 && discarded < 2) {
-        const card = source.handCards.pop()!;
-        this.deck.sendToDiscard(card);
-        discarded++;
+    // Resolve indices against the original snapshot, never the shrinking array.
+    const discard = (card: Card | undefined, slot?: EquipmentType): void => {
+      if (!card || card === weapon || discarded.has(card) || discarded.size >= 2) return;
+      if (slot !== undefined) {
+        if (source.equipZone[slot] !== card) return;
+        source.equipZone[slot] = null;
+        if (slot === EquipmentType.Armor) this.handleArmorOnLose(source, card);
+      } else {
+        const currentIndex = source.handCards.indexOf(card);
+        if (currentIndex < 0) return;
+        source.handCards.splice(currentIndex, 1);
       }
-      for (const [slot, card] of equipCards) {
-        if (discarded >= 2) break;
-        source.equipZone[slot as any as EquipmentType] = null;
-        this.deck.sendToDiscard(card);
-        discarded++;
-      }
-    } else {
-      // 让玩家选择2张牌弃置
-      const indices = await (driver as any).promptDiscardMulti?.(source, 2,
-        this.buildContext(source.id)) ?? [];
+      discarded.add(card);
+      card.cardSource = source;
+      this.deck.sendToDiscard(card);
+    };
 
-      let discarded = 0;
-      for (const idx of indices) {
-        if (idx < handLen) {
-          // 手牌区索引
-          const cardIdx = idx;
-          if (cardIdx >= 0 && cardIdx < source.handCards.length) {
-            const card = source.handCards.splice(cardIdx, 1)[0];
-            this.deck.sendToDiscard(card);
-            discarded++;
-          }
-        } else {
-          // 装备区索引 = idx - handLen
-          const equipIdx = idx - handLen;
-          if (equipIdx >= 0 && equipIdx < equipCards.length) {
-            const [slot, card] = equipCards[equipIdx];
-            source.equipZone[slot as any as EquipmentType] = null;
-            this.deck.sendToDiscard(card);
-            discarded++;
-          }
-        }
-      }
-
-      // 如果玩家取消或选了不足2张，补足
-      if (discarded < 2) {
-        while (discarded < 2 && source.handCards.length > 0) {
-          const card = source.handCards.pop()!;
-          this.deck.sendToDiscard(card);
-          discarded++;
-        }
-        const remainEquip = Object.entries(source.equipZone)
-          .filter(([, v]) => v !== null && v !== weapon) as [string, Card][];
-        for (const [slot, card] of remainEquip) {
-          if (discarded >= 2) break;
-          source.equipZone[slot as any as EquipmentType] = null;
-          this.deck.sendToDiscard(card);
-          discarded++;
-        }
+    for (const index of indices) {
+      if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) continue;
+      if (index < handCards.length) discard(handCards[index]);
+      else {
+        const entry = equipCards[index - handCards.length];
+        if (entry) discard(entry[1], entry[0]);
       }
     }
 
+    // Preserve the existing automatic fallback after confirmation/timeout:
+    // remaining hand cards first, then other equipment, never the axe itself.
+    for (const card of [...source.handCards].reverse()) discard(card);
+    for (const [slot, card] of Object.entries(source.equipZone)) {
+      if (card) discard(card, slot as EquipmentType);
+    }
     this.eventBus.emit(GameEvent.Log, {
-      message: `${source.name} 为发动【贯石斧】弃置了2张牌。`
+      message: `${source.name} 为发动【贯石斧】弃置了${discarded.size}张牌。`
     });
   }
 

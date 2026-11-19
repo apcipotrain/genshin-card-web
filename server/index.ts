@@ -7,10 +7,15 @@
 // @ts-expect-error - @types/express 未安装，tsx 运行时无影响
 import express from 'express';
 import { createServer } from 'http';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { Server as SocketIOServer } from 'socket.io';
-import { AccountManager, getLevelAndProgress } from './AccountManager.js';
+import { getLevelAndProgress } from './AccountManager.js';
+import { AccountApiClient } from './AccountApiClient.js';
+import { PvpSettlementQueue, type PendingSettlement } from './PvpSettlementQueue.js';
 import { RoomManager } from './RoomManager.js';
 import { GameHost } from './GameHost.js';
+import { ChatService, registerChat } from './ChatService.js';
 import { getNonGods, getGods, getHeroById } from '../src/data/heroes.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3457;
@@ -42,9 +47,19 @@ app.use((err: any, _req: any, res: any, _next: any) => {
 });
 
 // ==================== 核心管理器 ====================
-const accountManager = new AccountManager();
+const accountManager = new AccountApiClient(
+  process.env.ACCOUNT_API_URL || 'http://127.0.0.1:8080',
+  process.env.GAME_SERVICE_KEY || '',
+);
+const settlementQueue = new PvpSettlementQueue(
+  process.env.SETTLEMENT_JOURNAL || fileURLToPath(new URL('../.runtime/pvp-settlements.json', import.meta.url)),
+  entry => accountManager.settlePVP(entry.accountId, entry.amount, entry.role, entry.won, entry.operationId),
+);
+setInterval(() => { void settlementQueue.flush(); }, 30000).unref();
 const roomManager = new RoomManager();
 const gameHosts: Map<string, GameHost> = new Map(); // roomId → GameHost
+const chatService = new ChatService(roomId => gameHosts.has(roomId) && !!roomManager.getRoom(roomId));
+setInterval(() => chatService.sweep(), 60000).unref();
 
 // ==================== 辅助映射 ====================
 const tokenToSocket: Map<string, string> = new Map(); // token → socketId
@@ -66,16 +81,55 @@ const heroSelectState = new Map<string, {
   monarchHeroId?: string;
 }>();
 
+/** Keep room membership and the running match's online-player list in sync. */
+function releaseGamePlayer(roomId: string, socketId: string): void {
+  const host = gameHosts.get(roomId);
+  host?.handleDisconnect(socketId);
+  if (host && !host.hasAnyHumanPlayer()) {
+    host.abort();
+    gameHosts.delete(roomId);
+    roomManager.deleteRoom(roomId);
+    heroSelectState.delete(roomId);
+  } else if (!roomManager.getRoom(roomId)) {
+    heroSelectState.delete(roomId);
+  }
+}
+
 // ==================== Socket.IO 事件处理 ====================
 
 io.on('connection', (socket) => {
+  // Account I/O is asynchronous: serialize state-changing requests per connection.
+  let accountQueue = Promise.resolve();
+  const onAsync = (event: string, handler: (...args: any[]) => Promise<void>, errorEvent = 'error_msg') => {
+    socket.on(event, (...args: any[]) => {
+      accountQueue = accountQueue.then(async () => {
+        if (!socket.connected) return;
+        await handler(...args);
+      }).catch(() => {
+        console.error(`[Server] ${event}: 账号服务请求失败`);
+        const failure = { success: false, reason: '账号服务暂时不可用，请稍后重试' };
+        const ack = args[args.length - 1];
+        if (typeof ack === 'function') ack(failure);
+        else socket.emit(errorEvent, failure);
+      });
+    });
+  };
+  registerChat(socket, io, chatService, async () => {
+    const token = socketToToken.get(socket.id);
+    if (!token || tokenToSocket.get(token) !== socket.id) return null;
+    const account = await accountManager.validateToken(token);
+    const found = roomManager.findPlayer(token);
+    if (!socket.connected || socketToToken.get(socket.id) !== token || tokenToSocket.get(token) !== socket.id ||
+      !account || !found || !gameHosts.has(found.roomId) || socketToRoom.get(socket.id) !== found.roomId) return null;
+    return { roomId: found.roomId, accountId: account.id, name: account.nickname || account.name };
+  });
   console.log(`[Server] 新连接: ${socket.id}`);
 
   // ---------- 账号 ----------
 
-  socket.on('signup', (data: { name: string; password: string }) => {
-    console.log(`[Server] signup: ${data.name}  (socket: ${socket.id})`);
-    const result = accountManager.signup(data.name, data.password);
+  onAsync('signup', async (data: { name: string; password: string }) => {
+    const result = await accountManager.signup(data?.name, data?.password);
+    if (!socket.connected) return;
     console.log(`[Server] signup_result:`, result.success ? '成功' : result.reason);
     socket.emit('signup_result', result);
     if (result.success && result.token) {
@@ -83,11 +137,11 @@ io.on('connection', (socket) => {
       socketToToken.set(socket.id, result.token);
       socket.emit('logged_in', { account: result.account, token: result.token });
     }
-  });
+  }, 'signup_result');
 
-  socket.on('login', (data: { name: string; password: string }) => {
-    console.log(`[Server] login: ${data.name}  (socket: ${socket.id})`);
-    const result = accountManager.login(data.name, data.password);
+  onAsync('login', async (data: { name: string; password: string }) => {
+    const result = await accountManager.login(data?.name, data?.password);
+    if (!socket.connected) return;
     console.log(`[Server] login_result:`, result.success ? '成功' : result.reason);
     socket.emit('login_result', result);
     if (result.success && result.token) {
@@ -95,10 +149,11 @@ io.on('connection', (socket) => {
       socketToToken.set(socket.id, result.token);
       socket.emit('logged_in', { account: result.account, token: result.token });
     }
-  });
+  }, 'login_result');
 
-  socket.on('auth_token', (data: { token: string }) => {
-    const account = accountManager.validateToken(data.token);
+  onAsync('auth_token', async (data: { token: string }) => {
+    const account = await accountManager.validateToken(data?.token);
+    if (!socket.connected) return;
     if (account) {
       tokenToSocket.set(data.token, socket.id);
       socketToToken.set(socket.id, data.token);
@@ -119,13 +174,14 @@ io.on('connection', (socket) => {
 
         socket.emit('reconnected', {
           roomId: found.roomId,
-          room: roomManager.getRoom(found.roomId),
+          room: roomManager.getPublicRoom(found.roomId),
+          mySlotIndex: found.slotIndex,
           hasActiveGame,
         });
 
         // 广播房间更新
         io.to(found.roomId).emit('room_update', {
-          room: roomManager.getRoom(found.roomId),
+          room: roomManager.getPublicRoom(found.roomId),
         });
       }
 
@@ -135,23 +191,32 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('logout', () => {
+  onAsync('logout', async () => {
     const token = socketToToken.get(socket.id);
     if (token) {
-      accountManager.logout(token);
+      await accountManager.logout(token);
+      const roomId = socketToRoom.get(socket.id) || roomManager.findPlayer(token)?.roomId;
+      roomManager.leaveRoom(token);
+      if (roomId) {
+        socket.leave(roomId);
+        releaseGamePlayer(roomId, socket.id);
+        const room = roomManager.getPublicRoom(roomId);
+        if (room) io.to(roomId).emit('room_update', { room });
+      }
       tokenToSocket.delete(token);
     }
     socketToToken.delete(socket.id);
+    socketToRoom.delete(socket.id);
     socket.emit('logged_out');
   });
 
-  socket.on('update_profile', (data: { nickname?: string; avatar?: string }) => {
+  onAsync('update_profile', async (data: { nickname?: string; avatar?: string }) => {
     const token = socketToToken.get(socket.id);
     if (!token) {
       socket.emit('error_msg', { reason: '请先登录' });
       return;
     }
-    const result = accountManager.updateProfile(token, data);
+    const result = await accountManager.updateProfile(token, data);
     if (result.success) {
       socket.emit('profile_updated', { account: result.account });
     } else {
@@ -159,13 +224,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('get_profile', () => {
+  onAsync('get_profile', async () => {
     const token = socketToToken.get(socket.id);
     if (!token) {
       socket.emit('error_msg', { reason: '请先登录' });
       return;
     }
-    const account = accountManager.validateToken(token);
+    const account = await accountManager.validateToken(token);
     if (account) {
       const progress = getLevelAndProgress(account.exp ?? 0);
       socket.emit('profile_data', { account, level: account.level, exp: account.exp, progress });
@@ -178,13 +243,14 @@ io.on('connection', (socket) => {
     socket.emit('room_list', { rooms: roomManager.getRoomList() });
   });
 
-  socket.on('create_room', (data: { roomName: string; password: string | null }) => {
+  onAsync('create_room', async (data: { roomName: string; password: string | null }) => {
     const token = socketToToken.get(socket.id);
     if (!token) {
       socket.emit('error_msg', { reason: '请先登录' });
       return;
     }
-    const account = accountManager.validateToken(token);
+    const account = await accountManager.validateToken(token);
+    if (!socket.connected) return;
     if (!account) {
       socket.emit('error_msg', { reason: 'token无效' });
       return;
@@ -196,6 +262,7 @@ io.on('connection', (socket) => {
       socket.leave(existing.roomId);
       socketToRoom.delete(socket.id);
       roomManager.leaveRoom(token);
+      releaseGamePlayer(existing.roomId, socket.id);
       // 如果旧房间有正在运行的游戏且已无真人玩家，中止游戏
       const oldHost = gameHosts.get(existing.roomId);
       if (oldHost && !oldHost.hasAnyHumanPlayer()) {
@@ -218,24 +285,25 @@ io.on('connection', (socket) => {
 
     socket.emit('room_created', {
       roomId,
-      room: roomManager.getRoom(roomId),
+      room: roomManager.getPublicRoom(roomId),
       isHost: true,
       mySlotIndex: 0,
     });
 
     // 同步广播房间状态，让等待页获得初始槽位数据
     io.to(roomId).emit('room_update', {
-      room: roomManager.getRoom(roomId),
+      room: roomManager.getPublicRoom(roomId),
     });
   });
 
-  socket.on('join_room', (data: { roomId: string; password?: string }) => {
+  onAsync('join_room', async (data: { roomId: string; password?: string }) => {
     const token = socketToToken.get(socket.id);
     if (!token) {
       socket.emit('error_msg', { reason: '请先登录' });
       return;
     }
-    const account = accountManager.validateToken(token);
+    const account = await accountManager.validateToken(token);
+    if (!socket.connected) return;
     if (!account) {
       socket.emit('error_msg', { reason: 'token无效' });
       return;
@@ -246,6 +314,8 @@ io.on('connection', (socket) => {
     if (existing) {
       roomManager.leaveRoom(token);
       socket.leave(existing.roomId);
+      socketToRoom.delete(socket.id);
+      releaseGamePlayer(existing.roomId, socket.id);
     }
 
     const result = roomManager.joinRoom(data.roomId, token, account.name, account.id, account.avatar || '', account.nickname || account.name, data.password);
@@ -255,20 +325,20 @@ io.on('connection', (socket) => {
 
       socket.emit('room_joined', {
         roomId: data.roomId,
-        room: roomManager.getRoom(data.roomId),
+        room: roomManager.getPublicRoom(data.roomId),
         mySlotIndex: result.slotIndex,
       });
 
       // 广播房间更新
       io.to(data.roomId).emit('room_update', {
-        room: roomManager.getRoom(data.roomId),
+        room: roomManager.getPublicRoom(data.roomId),
       });
     } else {
       socket.emit('error_msg', { reason: result.reason });
     }
   });
 
-  socket.on('leave_room', () => {
+  onAsync('leave_room', async () => {
     const token = socketToToken.get(socket.id);
     if (!token) return;
 
@@ -280,17 +350,15 @@ io.on('connection', (socket) => {
     // 无论房间是否被删除，都要清理 socket 映射和退出 Socket.IO 房间
     if (oldRoomId) {
       socket.leave(oldRoomId);
+      releaseGamePlayer(oldRoomId, socket.id);
     }
     socketToRoom.delete(socket.id);
     socket.emit('room_left');
 
     if (roomId) {
       // 房间仍存在（还有其他真人），广播更新
-      if (roomManager.getRoom(roomId)) {
-        io.to(roomId).emit('room_update', {
-          room: roomManager.getRoom(roomId),
-        });
-      }
+      const room = roomManager.getPublicRoom(roomId);
+      if (room) io.to(roomId).emit('room_update', { room });
     } else if (oldRoomId) {
       // 房间已删除（无真人玩家）→ 中止旧 GameHost
       const host = gameHosts.get(oldRoomId);
@@ -303,7 +371,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('toggle_ready', (data: { ready: boolean }) => {
+  onAsync('toggle_ready', async (data: { ready: boolean }) => {
     const token = socketToToken.get(socket.id);
     if (!token) return;
 
@@ -313,11 +381,11 @@ io.on('connection', (socket) => {
     roomManager.setReady(token, data.ready);
 
     io.to(found.roomId).emit('room_update', {
-      room: roomManager.getRoom(found.roomId),
+      room: roomManager.getPublicRoom(found.roomId),
     });
   });
 
-  socket.on('set_ai_fill', (data: { count: number }) => {
+  onAsync('set_ai_fill', async (data: { count: number }) => {
     const token = socketToToken.get(socket.id);
     if (!token) return;
 
@@ -330,14 +398,14 @@ io.on('connection', (socket) => {
     const found = roomManager.findPlayer(token);
     if (found) {
       io.to(found.roomId).emit('room_update', {
-        room: roomManager.getRoom(found.roomId),
+        room: roomManager.getPublicRoom(found.roomId),
       });
     }
   });
 
   // ---------- 选将 ----------
 
-  socket.on('start_hero_select', () => {
+  onAsync('start_hero_select', async () => {
     const token = socketToToken.get(socket.id);
     if (!token) return;
 
@@ -474,7 +542,7 @@ io.on('connection', (socket) => {
   });
 
   // 主公选将
-  socket.on('select_monarch_hero', (data: { heroId: string }) => {
+  onAsync('select_monarch_hero', async (data: { heroId: string }) => {
     const token = socketToToken.get(socket.id);
     if (!token) return;
 
@@ -560,7 +628,7 @@ io.on('connection', (socket) => {
     checkAllSelectedAndStart(found.roomId, token);
   });
 
-  socket.on('select_hero', (data: { heroId: string }) => {
+  onAsync('select_hero', async (data: { heroId: string }) => {
     const token = socketToToken.get(socket.id);
     if (!token) return;
 
@@ -585,17 +653,17 @@ io.on('connection', (socket) => {
 
   // ---------- PVE 经验值上报 ----------
 
-  socket.on('add_exp', (data: { totalExp: number }, ack?: (result: any) => void) => {
+  onAsync('add_exp', async (data: { totalExp: number }, ack?: (result: any) => void) => {
     const token = socketToToken.get(socket.id);
     if (!token) {
       ack?.({ success: false, reason: '未登录' });
       return;
     }
-    if (!data || typeof data.totalExp !== 'number' || data.totalExp < 0) {
+    if (!data || !Number.isSafeInteger(data.totalExp) || data.totalExp < 0 || data.totalExp > 100000) {
       ack?.({ success: false, reason: '经验值无效' });
       return;
     }
-    const result = accountManager.addExp(token, data.totalExp);
+    const result = await accountManager.addExp(token, data.totalExp);
     if (result) {
       ack?.({ success: true, oldLevel: result.oldLevel, newLevel: result.newLevel, totalExp: result.totalExp, leveledUp: result.leveledUp });
     } else {
@@ -604,18 +672,18 @@ io.on('connection', (socket) => {
   });
 
   // ---------- PVE 星级同步 ----------
-  socket.on('save_pve_stars', (data: { stars: Record<number, number> }, ack?: (result: any) => void) => {
+  onAsync('save_pve_stars', async (data: { stars: Record<number, number> }, ack?: (result: any) => void) => {
     const token = socketToToken.get(socket.id);
     if (!token) { ack?.({ success: false, reason: '未登录' }); return; }
-    const ok = accountManager.savePVEStars(token, data.stars);
+    const ok = await accountManager.savePVEStars(token, data?.stars);
     ack?.({ success: ok });
   });
 
   // ---------- 设置同步（BGM/语音/AI速度） ----------
-  socket.on('save_settings', (data: Record<string, any>, ack?: (result: any) => void) => {
+  onAsync('save_settings', async (data: Record<string, any>, ack?: (result: any) => void) => {
     const token = socketToToken.get(socket.id);
     if (!token) { ack?.({ success: false, reason: '未登录' }); return; }
-    const ok = accountManager.saveSettings(token, data);
+    const ok = await accountManager.saveSettings(token, data);
     ack?.({ success: ok });
   });
 
@@ -647,7 +715,7 @@ io.on('connection', (socket) => {
       }
 
       io.to(roomId).emit('room_update', {
-        room: roomManager.getRoom(roomId),
+        room: roomManager.getPublicRoom(roomId),
       });
     }
   });
@@ -691,6 +759,14 @@ function checkAllSelectedAndStart(roomId: string, _token: string): void {
   });
 }
 
+/** 判断某角色是否属于胜利方 */
+function isWinnerRole(role: string, winner: string): boolean {
+  if (winner.includes('反贼')) return role === 'Rebel';
+  if (winner.includes('内奸')) return role === 'Traitor';
+  if (winner.includes('主公') || winner.includes('忠臣')) return role === 'Monarch' || role === 'Minister';
+  return false;
+}
+
 // ==================== 启动游戏 ====================
 
 async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Promise<void> {
@@ -705,6 +781,7 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
   try {
     const room = roomManager.getRoom(roomId);
     if (!room) return;
+    const initialSlots = JSON.stringify(room.slots);
 
     // 收集未分配的非神英雄给AI（排除已有heroId的AI，如AI主公）
     const usedHeroIds = new Set<string>();
@@ -723,11 +800,17 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
 
     // 构建真人玩家的 accountMap（token → account），使 GameHost 能正确显示玩家名
     const accountMap = new Map<string, Omit<import('./AccountManager.js').Account, 'passwordHash'>>();
-    for (const slot of room.slots) {
-      if (slot.token) {
-        const acct = accountManager.validateToken(slot.token);
-        if (acct) accountMap.set(slot.token, acct);
-      }
+    await Promise.all(room.slots.filter(slot => slot.token).map(async slot => {
+      const token = slot.token!;
+      const acct = await accountManager.validateToken(token);
+      if (!acct) throw new Error('玩家登录已失效，请重新登录后开始对局');
+      accountMap.set(token, acct);
+    }));
+    const currentRoom = roomManager.getRoom(roomId);
+    if (!currentRoom || currentRoom.slots !== room.slots || currentRoom.aiFill !== room.aiFill ||
+      JSON.stringify(currentRoom.slots) !== initialSlots || gameHosts.has(roomId)) {
+      io.to(roomId).emit('error_msg', { reason: '房间成员已变化，请重新开始选将' });
+      return;
     }
 
     // 创建 GameHost
@@ -742,6 +825,7 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
 
     gameHosts.set(roomId, host);
     await host.initGame(aiHeroIds);
+    if (gameHosts.get(roomId) !== host) return;
 
     // 根据君主槽位索引设置游戏中的主公角色
     // monarchSlotIndex 是 room.slots 中的槽位索引 (0-7)
@@ -764,6 +848,7 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
               roomId,
               players: sanitizedPlayers,
               yourPlayerId: playerId,
+              monarchRegion: host.getMonarchRegion(),
               drawPileCount: host.deckPileCount,
             });
           }
@@ -772,7 +857,9 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
     }
 
     // 启动游戏循环（异步，不阻塞）
-    host.start().then(() => {
+    const matchId = randomUUID();
+    host.start().then(async () => {
+      if (gameHosts.get(roomId) !== host) return;
       console.log(`[GameHost] 房间 ${roomId} 游戏结束，胜利方: ${host.winner || '未知'}`);
 
       // 中途退出/非正常结束不计算经验
@@ -784,9 +871,19 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
       // 计算经验值并更新账号（逃跑玩家跳过写库）
       const expList = host.computeExpForAllPlayers();
       const resultData = host.getGameResultData();
-      // 调试日志
-      if (resultData) console.log(`[GameHost] 经验计算: ${resultData.players.map(p => `${p.name}(tk=${p.token?.substring(0,6)||'null'},ai=${p.isAI})`).join(', ')}`);
-      const escapedSet = new Set(resultData?.escapedPlayerIds ?? []);
+      const settlements: PendingSettlement[] = [];
+      if (expList && resultData) {
+        for (const exp of expList) {
+          const player = resultData.players.find(p => p.playerId === exp.playerId);
+          if (player?.accountId && !player.isAI && !exp.escaped) {
+            settlements.push({ accountId: player.accountId, operationId: matchId,
+              amount: exp.totalExp, role: player.role, won: isWinnerRole(player.role, host.winner || '') });
+          }
+        }
+      }
+      settlementQueue.enqueue(settlements);
+      const settled = await Promise.all(settlements.map(entry => settlementQueue.attempt(entry)));
+      let settlementPending = false;
       let expByPlayerId: Record<number, { baseExp: number; bonusExp: number; totalExp: number; oldLevel: number; newLevel: number; leveledUp: boolean; escaped: boolean }> = {};
       if (expList && resultData) {
         for (const exp of expList) {
@@ -804,10 +901,10 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
                 escaped: true,
               };
             } else {
-              // 优先用 accountId 直接加经验（避免 token 在 tokens map 中过期找不到）
-              const result = (player.accountId
-                ? accountManager.addExpByAccountId(player.accountId, exp.totalExp)
-                : accountManager.addExp(player.token, exp.totalExp));
+              // Java commits experience and role statistics in one idempotent transaction.
+              const entry = settlements.find(item => item.accountId === player.accountId);
+              const result = entry ? settled[settlements.indexOf(entry)] : null;
+              if (!result) settlementPending = true;
               if (result) {
                 expByPlayerId[exp.playerId] = {
                   baseExp: exp.baseExp,
@@ -839,15 +936,17 @@ async function startGameForRoom(roomId: string, monarchSlotIndex?: number): Prom
         expByPlayerId,
         escapedPlayerIds: resultData?.escapedPlayerIds ?? [],
         playerRoles,
+        settlementPending,
       });
       gameHosts.delete(roomId);
       roomManager.deleteRoom(roomId);
     }).catch(err => {
+      if (gameHosts.get(roomId) !== host) return;
       console.error(`[GameHost] 房间 ${roomId} 游戏异常:`, err);
       io.to(roomId).emit('game_over', { roomId, error: String(err) });
       gameHosts.delete(roomId);
       roomManager.deleteRoom(roomId);
-    });
+    }).finally(() => host.abort());
   } catch (err: any) {
     console.error(`[startGameForRoom] 房间 ${roomId} 初始化失败:`, err?.message || err);
     console.error(err?.stack);
@@ -865,6 +964,13 @@ app.get('/api/health', (_req: any, res: any) => {
 
 // ==================== 启动 ====================
 
+try {
+  if (!await accountManager.health()) throw new Error('账号服务未就绪');
+} catch {
+  console.error('Java 账号服务未就绪，请先运行 npm run backend，或使用 npm start');
+  process.exit(1);
+}
+void settlementQueue.flush();
 httpServer.listen(PORT, () => {
   console.log('========================================');
   console.log(`  原神杀 PVP 服务器已启动`);

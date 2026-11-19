@@ -1,0 +1,197 @@
+.hero-select-panel.pvp-hero-select {
+  --selection-ink: #23484d;
+  --selection-muted: #536a65;
+  --selection-gold: #87642c;
+  --selection-line: #d0d7c6;
+  width: min(600px, 100%);
+  padding: clamp(16px, 3vw, 30px);
+  border-color: var(--selection-line);
+  background: #f8f6ed;
+  color: var(--selection-ink);
+  text-align: start;
+}
+
+.hero-select-panel.pvp-hero-select-wide {
+  width: min(920px, 100%);
+}
+
+.pvp-selection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--selection-line);
+}
+
+.pvp-hero-select h2 {
+  margin: 0 0 5px;
+  color: var(--selection-ink);
+  letter-spacing: .05em;
+}
+
+.pvp-hero-select p {
+  color: var(--selection-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.pvp-selection-deadline {
+  display: grid;
+  gap: 6px;
+  flex: 0 0 clamp(66px, 14vw, 94px);
+  color: var(--selection-gold);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.pvp-selection-deadline.is-urgent { color: #9a3c31; }
+
+.pvp-selection-deadline progress {
+  width: 100%;
+  height: 5px;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #e8e3d5;
+  color: inherit;
+}
+
+.pvp-selection-deadline progress::-webkit-progress-bar { background: #e8e3d5; }
+.pvp-selection-deadline progress::-webkit-progress-value { background: currentColor; }
+.pvp-selection-deadline progress::-moz-progress-bar { background: currentColor; }
+
+.pvp-monarch-reference {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+  color: var(--selection-gold);
+}
+
+.pvp-monarch-reference img {
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  border: 1px solid #c5b998;
+  object-fit: cover;
+}
+
+.pvp-monarch-reference img[hidden] { display: none; }
+.pvp-monarch-reference span { display: block; font-size: 11px; }
+.pvp-monarch-reference strong { display: block; font-size: 14px; }
+
+.pvp-selection-groups {
+  display: grid;
+  gap: 18px;
+  padding-top: 16px;
+}
+
+.pvp-hero-select-wide .pvp-selection-groups {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pvp-selection-group {
+  min-width: 0;
+}
+
+.pvp-selection-group h3 {
+  color: var(--selection-gold);
+  font-size: 13px;
+  margin-bottom: 9px;
+}
+
+.pvp-hero-select .hero-cards-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: clamp(6px, 1vw, 12px);
+}
+
+.hero-select-panel.pvp-hero-select .hero-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: clamp(6px, 1vw, 10px);
+  border: 1px solid var(--selection-line);
+  border-radius: 10px;
+  background: #fffdf5;
+  box-shadow: none;
+  color: var(--selection-ink);
+  font: inherit;
+  transition: background .18s, border-color .18s, box-shadow .18s, transform .18s;
+}
+
+.hero-select-panel.pvp-hero-select .hero-card:hover,
+.hero-select-panel.pvp-hero-select .hero-card:focus-visible {
+  transform: translateY(-3px);
+  border-color: #9c773c;
+  background: #fffaeb;
+  box-shadow: 0 5px 12px #59451c24;
+}
+
+.pvp-hero-select .hero-card:focus-visible {
+  outline: 2px solid #725521;
+  outline-offset: 2px;
+}
+
+.pvp-hero-select .hero-card-img {
+  display: grid;
+  place-items: center;
+  width: min(100%, 104px);
+  margin-bottom: 7px;
+  border: 0;
+  border-radius: 7px;
+  background: #e5ebdf;
+  font-size: 25px;
+}
+
+.pvp-hero-select .hero-card-img img { display: block; }
+.pvp-hero-select .hero-card-name {
+  gap: 3px;
+  flex-wrap: wrap;
+  font-size: clamp(11px, 2.3vw, 16px);
+  color: var(--selection-ink);
+}
+.pvp-hero-select .hero-god-badge {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f1e5c5;
+  color: #725522;
+}
+.pvp-hero-select .hero-card-title { color: var(--selection-gold); }
+.pvp-hero-select .hero-card-region { color: var(--selection-muted); }
+.pvp-hero-select .hero-card-title,
+.pvp-hero-select .hero-card-region { font-size: clamp(10px, 2.1vw, 12px); }
+.pvp-hero-select .hero-card-hp { margin-top: auto; padding-top: 5px; color: #864a42; }
+
+.hero-select-panel.pvp-selection-status {
+  width: min(440px, 100%);
+  text-align: center;
+}
+
+.pvp-selection-portrait {
+  display: block;
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 12px;
+  border: 1px solid #c5b998;
+  border-radius: 9px;
+  object-fit: cover;
+}
+
+.pvp-selection-portrait[hidden] { display: none; }
+
+@media (max-width: 760px) {
+  .pvp-hero-select-wide .pvp-selection-groups { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-select-panel.pvp-hero-select .hero-card { transition: none; }
+  .hero-select-panel.pvp-hero-select .hero-card:hover,
+  .hero-select-panel.pvp-hero-select .hero-card:focus-visible { transform: none; }
+}
